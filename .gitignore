@@ -1,0 +1,43 @@
+# ── Secret keys — NEVER commit ───────────────────────────────────────────────
+.env
+
+# ── Excluded app versions ─────────────────────────────────────────────────────
+app_v5__claude*.py
+
+# ── Result cache — confidential extracted data, local only ───────────────────
+well_cache.json
+well_cache.json.tmp
+
+# ── Temp folder for uploaded PDFs ────────────────────────────────────────────
+temp/
+*.pdf
+!sample.pdf
+
+# ── Long-callback manager cache (auto-created on app start) ──────────────────
+.cache/
+
+# ── Python clutter ───────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Virtual environments ─────────────────────────────────────────────────────
+venv/
+env/
+.venv/
+
+# ── IDE files ────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ── Output files ─────────────────────────────────────────────────────────────
+*.csv
+*.txt
+!requirements.txt

@@ -1,0 +1,40 @@
+# Well Report Analyzer — pip dependencies
+# Install everything with: pip install -r requirements.txt
+
+# ── Dash web framework ────────────────────────────────────────────────────────
+# dash and dash-bootstrap-components must be kept in sync.
+# DBC 2.x requires Dash 3+, which has breaking changes for long_callback.
+# Keep both pinned to these tested versions.
+dash==2.17.1
+dash-bootstrap-components==1.6.0
+
+# ── PDF extraction ────────────────────────────────────────────────────────────
+pdfplumber==0.11.4     # digital PDF text + table extraction (always required)
+Pillow==10.4.0         # image handling used by pdf2image
+
+# ── OCR fallback (scanned PDFs only) ─────────────────────────────────────────
+# Only needed if you want to process image-scanned PDFs where text cannot be
+# selected. The sample PDFs in this repo are digital and work without OCR.
+# You also need Tesseract and Poppler installed on your OS — see README.
+pdf2image==1.17.0      # converts scanned PDF pages to images for OCR
+pytesseract==0.3.13    # Python wrapper for the Tesseract OCR engine
+
+# ── LLM providers ─────────────────────────────────────────────────────────────
+# All three are installed so you can switch provider from the UI dropdown
+# without reinstalling. Only the one matching your .env key is actually called.
+openai>=1.51.0             # OpenAI GPT models
+anthropic==0.30.1          # Anthropic Claude models
+google-generativeai==0.7.2 # Google Gemini models (recommended — free tier)
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+python-dotenv==1.0.1   # reads API keys from your .env file at startup
+
+# ── Long callback (live pipeline progress) ────────────────────────────────────
+# Required by @app.long_callback so the pipeline runs in a background
+# subprocess and can stream live stepper updates to the UI via set_progress.
+diskcache==5.6.3
+multiprocess==0.70.16
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest==8.2.2          # test runner  (run with: pytest test_app.py -v)
+pytest-cov==5.0.0      # coverage reports (add --cov=app_v4 --cov-report=term-missing)
