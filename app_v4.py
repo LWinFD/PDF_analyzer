@@ -497,7 +497,7 @@ def analyze_with_llm(raw_text: str, provider: str = None) -> dict:
                 "model_name":    response.model,
             }
         except Exception:
-            _llm_call_meta = {"input_tokens": 0, "output_tokens": 0, "model_name": "gpt-4o-mini"}
+            _llm_call_meta = {"input_tokens": 0, "output_tokens": 0, "model_name": "gpt-5.4-mini"}
         return _parse_llm_json(response.choices[0].message.content)
 
     elif provider == "anthropic":
