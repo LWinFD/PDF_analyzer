@@ -12,6 +12,7 @@ well_cache.json.tmp
 temp/
 *.pdf
 !sample.pdf
+!Well_Reports/*.pdf
 
 # ── Long-callback manager cache (auto-created on app start) ──────────────────
 .cache/
