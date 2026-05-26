@@ -49,9 +49,25 @@ CACHE_FILE         = "./well_cache.json"  # persistent results cache (local only
 # ── Load .env file ────────────────────────────────────────────────────────────
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 except ImportError:
     print("[WARNING] python-dotenv not installed. Reading API keys from system env only.")
+
+# ── Corporate proxy workaround ───────────────────────────────────────────────
+# httpx 0.28+ removed the 'proxies' parameter. Corporate proxy tools (e.g.
+# Zscaler) on managed machines still inject it via the old API, which crashes
+# the anthropic and openai SDKs on initialisation. Patching both Client and
+# AsyncClient here drops the argument before httpx processes it.
+try:
+    import httpx
+    _orig_client       = httpx.Client.__init__
+    _orig_async_client = httpx.AsyncClient.__init__
+    def _client_init(self, *a, **kw):       kw.pop("proxies", None); _orig_client(self, *a, **kw)
+    def _async_client_init(self, *a, **kw): kw.pop("proxies", None); _orig_async_client(self, *a, **kw)
+    httpx.Client.__init__      = _client_init
+    httpx.AsyncClient.__init__ = _async_client_init
+except Exception:
+    pass
 
 # ── Ensure temp folder exists ─────────────────────────────────────────────────
 os.makedirs(TEMP_FOLDER, exist_ok=True)
