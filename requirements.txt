@@ -34,6 +34,7 @@ python-dotenv==1.0.1   # reads API keys from your .env file at startup
 # subprocess and can stream live stepper updates to the UI via set_progress.
 diskcache==5.6.3
 multiprocess==0.70.16
+psutil>=5.9.0
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 pytest==8.2.2          # test runner  (run with: pytest test_app.py -v)
