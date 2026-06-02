@@ -1,14 +1,16 @@
 """
-test_app.py — Unit tests for Well Report Analyzer (app.py)
+test_app.py — Unit tests for Well Report Analyzer
 
 Covers all functions with mocks so NO real API key, PDF, or running server
-is needed.
+is needed.  The module under test is still imported as `app` because app.py
+re-exports every public name from the five sub-modules (cache, pdf_extract,
+llm_clients, layout, callbacks).
 
 Run with:
     pytest test_app.py -v
 
 With coverage:
-    pytest test_app.py -v --cov=app --cov-report=term-missing
+    pytest test_app.py -v --cov=app --cov=cache --cov=pdf_extract --cov=llm_clients --cov=layout --cov=callbacks --cov-report=term-missing
 
 Install test deps:
     pip install pytest pytest-cov
@@ -518,38 +520,38 @@ class TestCacheFunctions(unittest.TestCase):
                 pass
 
     def test_load_missing_file_returns_empty_dict(self):
-        with patch("app.CACHE_FILE", self.tmp):
+        with patch("cache.CACHE_FILE", self.tmp):
             result = A._load_cache()
         self.assertEqual(result, {})
 
     def test_load_corrupt_json_returns_empty_dict(self):
         with open(self.tmp, "w") as f:
             f.write("{not valid json")
-        with patch("app.CACHE_FILE", self.tmp):
+        with patch("cache.CACHE_FILE", self.tmp):
             result = A._load_cache()
         self.assertEqual(result, {})
 
     def test_save_then_load_round_trip(self):
         data = {"k1": {"wellbore_name": "Alpha"}, "k2": {"wellbore_name": "Beta"}}
-        with patch("app.CACHE_FILE", self.tmp):
+        with patch("cache.CACHE_FILE", self.tmp):
             A._save_cache(data)
             loaded = A._load_cache()
         self.assertEqual(loaded, data)
 
     def test_save_creates_file(self):
-        with patch("app.CACHE_FILE", self.tmp):
+        with patch("cache.CACHE_FILE", self.tmp):
             A._save_cache({"x": 1})
         self.assertTrue(os.path.exists(self.tmp))
 
     def test_save_atomic_no_tmp_leftover(self):
         """The .tmp staging file must be gone after a successful save."""
-        with patch("app.CACHE_FILE", self.tmp):
+        with patch("cache.CACHE_FILE", self.tmp):
             A._save_cache({"x": 1})
         self.assertFalse(os.path.exists(self.tmp + ".tmp"))
 
     def test_save_preserves_unicode(self):
         data = {"k": {"name": "Gullfaks Sørvest"}}
-        with patch("app.CACHE_FILE", self.tmp):
+        with patch("cache.CACHE_FILE", self.tmp):
             A._save_cache(data)
             loaded = A._load_cache()
         self.assertEqual(loaded["k"]["name"], "Gullfaks Sørvest")
@@ -572,7 +574,7 @@ class TestExtractTextFromPdf(unittest.TestCase):
         mock_pdf         = MagicMock()
         mock_pdf.pages   = [self._mock_page(text=page_text)]
         mock_open.return_value.__enter__.return_value = mock_pdf
-        result = A.extract_text_from_pdf("fake.pdf")
+        result, _ = A.extract_text_from_pdf("fake.pdf")
         self.assertIn("A" * 50, result)
         self.assertIn("PAGE 1", result)
 
@@ -582,7 +584,7 @@ class TestExtractTextFromPdf(unittest.TestCase):
         mock_pdf         = MagicMock()
         mock_pdf.pages   = [self._mock_page(text="B" * 50, tables=[table])]
         mock_open.return_value.__enter__.return_value = mock_pdf
-        result = A.extract_text_from_pdf("fake.pdf")
+        result, _ = A.extract_text_from_pdf("fake.pdf")
         self.assertIn("Col1 | Col2", result)
         self.assertIn("Val1 | Val2", result)
 
@@ -592,7 +594,7 @@ class TestExtractTextFromPdf(unittest.TestCase):
         mock_pdf.pages   = [self._mock_page(text="tiny")]
         mock_open.return_value.__enter__.return_value = mock_pdf
         with patch.dict(sys.modules, {"pdf2image": None, "pytesseract": None}):
-            result = A.extract_text_from_pdf("fake.pdf")
+            result, _ = A.extract_text_from_pdf("fake.pdf")
         self.assertIn("PAGE 1", result)
 
     @patch("pdfplumber.open")
@@ -600,7 +602,7 @@ class TestExtractTextFromPdf(unittest.TestCase):
         mock_pdf         = MagicMock()
         mock_pdf.pages   = [self._mock_page(text="X" * 50) for _ in range(3)]
         mock_open.return_value.__enter__.return_value = mock_pdf
-        result = A.extract_text_from_pdf("fake.pdf")
+        result, _ = A.extract_text_from_pdf("fake.pdf")
         for i in range(1, 4):
             self.assertIn(f"PAGE {i}", result)
 
@@ -612,18 +614,18 @@ class TestExtractTextFromPdf(unittest.TestCase):
         mock_pdf         = MagicMock()
         mock_pdf.pages   = [page]
         mock_open.return_value.__enter__.return_value = mock_pdf
-        result = A.extract_text_from_pdf("fake.pdf")
+        result, _ = A.extract_text_from_pdf("fake.pdf")
         self.assertIn("TEXT ERROR", result)
 
     @patch("pdfplumber.open")
     def test_extract_meta_populated_after_call(self, mock_open):
-        """_extract_meta side-effect dict must hold page_count and ocr_used after extraction."""
+        """extract_text_from_pdf must return (text, meta) with page_count and ocr_used."""
         mock_pdf         = MagicMock()
         mock_pdf.pages   = [self._mock_page(text="Z" * 50) for _ in range(5)]
         mock_open.return_value.__enter__.return_value = mock_pdf
-        A.extract_text_from_pdf("fake.pdf")
-        self.assertEqual(A._extract_meta["page_count"], 5)
-        self.assertIn("ocr_used", A._extract_meta)
+        _, meta = A.extract_text_from_pdf("fake.pdf")
+        self.assertEqual(meta["page_count"], 5)
+        self.assertIn("ocr_used", meta)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -637,7 +639,7 @@ class TestAnalyzeWithLlm(unittest.TestCase):
         return json.dumps(_full_params(wellbore))
 
     # ── OpenAI ────────────────────────────────────────────────────────────────
-    @patch("app.LLM_PROVIDER", "openai")
+    @patch("llm_clients.LLM_PROVIDER", "openai")
     @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"})
     @patch("openai.OpenAI")
     def test_openai_returns_all_15_keys(self, mock_cls):
@@ -646,10 +648,10 @@ class TestAnalyzeWithLlm(unittest.TestCase):
             self._mock_json()
         )
         mock_cls.return_value = mock_client
-        result = A.analyze_with_llm("drilling text")
+        result, _ = A.analyze_with_llm("drilling text")
         self.assertEqual(set(result.keys()), self.ALL_KEYS)
 
-    @patch("app.LLM_PROVIDER", "openai")
+    @patch("llm_clients.LLM_PROVIDER", "openai")
     @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"})
     @patch("openai.OpenAI")
     def test_openai_wellbore_name_extracted(self, mock_cls):
@@ -658,14 +660,14 @@ class TestAnalyzeWithLlm(unittest.TestCase):
             self._mock_json("15/9-F-11 T2")
         )
         mock_cls.return_value = mock_client
-        result = A.analyze_with_llm("drilling text")
+        result, _ = A.analyze_with_llm("drilling text")
         self.assertEqual(result["wellbore_name"], "15/9-F-11 T2")
 
-    @patch("app.LLM_PROVIDER", "openai")
+    @patch("llm_clients.LLM_PROVIDER", "openai")
     @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"})
     @patch("openai.OpenAI")
     def test_openai_populates_llm_call_meta(self, mock_cls):
-        """Token counts and model name must be captured in _llm_call_meta."""
+        """Token counts and model name must be returned in the second tuple element."""
         mock_resp                          = MagicMock()
         mock_resp.choices[0].message.content = self._mock_json()
         mock_resp.usage.prompt_tokens      = 1234
@@ -674,12 +676,12 @@ class TestAnalyzeWithLlm(unittest.TestCase):
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_resp
         mock_cls.return_value = mock_client
-        A.analyze_with_llm("text")
-        self.assertEqual(A._llm_call_meta["input_tokens"],  1234)
-        self.assertEqual(A._llm_call_meta["output_tokens"], 56)
-        self.assertEqual(A._llm_call_meta["model_name"],    "gpt-4o-mini")
+        _, meta = A.analyze_with_llm("text")
+        self.assertEqual(meta["input_tokens"],  1234)
+        self.assertEqual(meta["output_tokens"], 56)
+        self.assertEqual(meta["model_name"],    "gpt-4o-mini")
 
-    @patch("app.LLM_PROVIDER", "openai")
+    @patch("llm_clients.LLM_PROVIDER", "openai")
     @patch.dict(os.environ, {"OPENAI_API_KEY": ""})
     def test_openai_missing_key_raises(self):
         with self.assertRaises(RuntimeError) as ctx:
@@ -687,17 +689,17 @@ class TestAnalyzeWithLlm(unittest.TestCase):
         self.assertIn("OPENAI_API_KEY", str(ctx.exception))
 
     # ── Anthropic ─────────────────────────────────────────────────────────────
-    @patch("app.LLM_PROVIDER", "anthropic")
+    @patch("llm_clients.LLM_PROVIDER", "anthropic")
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "ant-test"})
     @patch("anthropic.Anthropic")
     def test_anthropic_returns_all_15_keys(self, mock_cls):
         mock_client = MagicMock()
         mock_client.messages.create.return_value.content[0].text = self._mock_json()
         mock_cls.return_value = mock_client
-        result = A.analyze_with_llm("text")
+        result, _ = A.analyze_with_llm("text")
         self.assertEqual(set(result.keys()), self.ALL_KEYS)
 
-    @patch("app.LLM_PROVIDER", "anthropic")
+    @patch("llm_clients.LLM_PROVIDER", "anthropic")
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": ""})
     def test_anthropic_missing_key_raises(self):
         with self.assertRaises(RuntimeError) as ctx:
@@ -705,23 +707,17 @@ class TestAnalyzeWithLlm(unittest.TestCase):
         self.assertIn("ANTHROPIC_API_KEY", str(ctx.exception))
 
     # ── Gemini ────────────────────────────────────────────────────────────────
-    @patch("app.LLM_PROVIDER", "gemini")
+    @patch("llm_clients.LLM_PROVIDER", "gemini")
     @patch("google.generativeai.configure")
     @patch("google.generativeai.GenerativeModel")
     def test_gemini_returns_all_15_keys(self, mock_model_cls, _):
         mock_model = MagicMock()
         mock_model.generate_content.return_value.text = self._mock_json()
         mock_model_cls.return_value = mock_model
-        result = A.analyze_with_llm("text")
+        result, _ = A.analyze_with_llm("text")
         self.assertEqual(set(result.keys()), self.ALL_KEYS)
 
-    @unittest.skip(
-        "KNOWN ISSUE: The Gemini API key is hardcoded directly in analyze_with_llm() "
-        "('api_key = \"AIza...\"'), so the empty-key guard never fires even when "
-        "GEMINI_API_KEY is unset.  Re-enable this test once the hardcoded key is "
-        "removed and the key is read exclusively from os.environ.get('GEMINI_API_KEY')."
-    )
-    @patch("app.LLM_PROVIDER", "gemini")
+    @patch("llm_clients.LLM_PROVIDER", "gemini")
     @patch.dict(os.environ, {"GEMINI_API_KEY": ""})
     def test_gemini_missing_key_raises(self):
         with self.assertRaises(RuntimeError) as ctx:
@@ -729,7 +725,7 @@ class TestAnalyzeWithLlm(unittest.TestCase):
         self.assertIn("GEMINI_API_KEY", str(ctx.exception))
 
     # ── Unknown provider ──────────────────────────────────────────────────────
-    @patch("app.LLM_PROVIDER", "unknown")
+    @patch("llm_clients.LLM_PROVIDER", "unknown")
     def test_unknown_provider_raises(self):
         with self.assertRaises(RuntimeError) as ctx:
             A.analyze_with_llm("text")
@@ -745,11 +741,11 @@ class TestAnalyzeWithLlm(unittest.TestCase):
             self._mock_json()
         )
         mock_cls.return_value = mock_client
-        result = A.analyze_with_llm("text", provider="openai")
+        result, _ = A.analyze_with_llm("text", provider="openai")
         self.assertEqual(set(result.keys()), self.ALL_KEYS)
 
     # ── Markdown fence stripping ──────────────────────────────────────────────
-    @patch("app.LLM_PROVIDER", "openai")
+    @patch("llm_clients.LLM_PROVIDER", "openai")
     @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"})
     @patch("openai.OpenAI")
     def test_fenced_json_response_parsed_correctly(self, mock_cls):
@@ -757,7 +753,7 @@ class TestAnalyzeWithLlm(unittest.TestCase):
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value.choices[0].message.content = fenced
         mock_cls.return_value = mock_client
-        result = A.analyze_with_llm("text")
+        result, _ = A.analyze_with_llm("text")
         self.assertEqual(set(result.keys()), self.ALL_KEYS)
 
 
@@ -780,31 +776,31 @@ class TestProcessSinglePdf(unittest.TestCase):
         self.assertIsNone(result)
         self.assertIn("MB", err)
 
-    @patch("app.extract_text_from_pdf")
-    @patch("app.analyze_with_llm")
+    @patch("callbacks.extract_text_from_pdf")
+    @patch("callbacks.analyze_with_llm")
     def test_happy_path_returns_all_15_param_keys(self, mock_llm, mock_extract):
-        mock_extract.return_value = "Drilling report text " * 10
-        mock_llm.return_value     = _full_params("15/9-F-11 T2")
+        mock_extract.return_value = ("Drilling report text " * 10, {"page_count": 1, "ocr_used": False})
+        mock_llm.return_value     = (_full_params("15/9-F-11 T2"), {"input_tokens": 0, "output_tokens": 0, "model_name": ""})
         result, err = A.process_single_pdf(self._make_contents(), "well.pdf")
         self.assertEqual(err, "")
         param_keys = set(result.keys()) - {"_source_file", "_meta"}
         self.assertEqual(param_keys, set(A.PARAM_LABELS.keys()))
 
-    @patch("app.extract_text_from_pdf")
-    @patch("app.analyze_with_llm")
+    @patch("callbacks.extract_text_from_pdf")
+    @patch("callbacks.analyze_with_llm")
     def test_happy_path_includes_wellbore_name(self, mock_llm, mock_extract):
-        mock_extract.return_value = "Drilling report text " * 10
-        mock_llm.return_value     = _full_params("15/9-F-11 T2")
+        mock_extract.return_value = ("Drilling report text " * 10, {"page_count": 1, "ocr_used": False})
+        mock_llm.return_value     = (_full_params("15/9-F-11 T2"), {"input_tokens": 0, "output_tokens": 0, "model_name": ""})
         result, _  = A.process_single_pdf(self._make_contents(), "well.pdf")
         self.assertEqual(result["wellbore_name"], "15/9-F-11 T2")
         self.assertEqual(result["_source_file"],  "well.pdf")
 
-    @patch("app.extract_text_from_pdf")
-    @patch("app.analyze_with_llm")
+    @patch("callbacks.extract_text_from_pdf")
+    @patch("callbacks.analyze_with_llm")
     def test_result_contains_meta_dict_with_required_fields(self, mock_llm, mock_extract):
         """Every successful result must have a _meta dict with all provenance fields."""
-        mock_extract.return_value = "text " * 20
-        mock_llm.return_value     = _full_params()
+        mock_extract.return_value = ("text " * 20, {"page_count": 1, "ocr_used": False})
+        mock_llm.return_value     = (_full_params(), {"input_tokens": 0, "output_tokens": 0, "model_name": ""})
         result, _ = A.process_single_pdf(self._make_contents(), "well.pdf")
         self.assertIn("_meta", result)
         for field in [
@@ -815,33 +811,36 @@ class TestProcessSinglePdf(unittest.TestCase):
         ]:
             self.assertIn(field, result["_meta"])
 
-    @patch("app.extract_text_from_pdf")
-    def test_empty_extraction_returns_error(self, mock_extract):
-        mock_extract.return_value = "   "
+    @patch("callbacks.extract_text_from_pdf")
+    @patch("callbacks._load_cache", return_value={})
+    def test_empty_extraction_returns_error(self, _mock_cache, mock_extract):
+        mock_extract.return_value = ("   ", {"page_count": 1, "ocr_used": False})
         result, err = A.process_single_pdf(self._make_contents(), "empty.pdf")
         self.assertIsNone(result)
         self.assertIn("no text", err)
 
-    @patch("app.extract_text_from_pdf")
-    def test_extraction_exception_returns_error(self, mock_extract):
+    @patch("callbacks.extract_text_from_pdf")
+    @patch("callbacks._load_cache", return_value={})
+    def test_extraction_exception_returns_error(self, _mock_cache, mock_extract):
         mock_extract.side_effect = RuntimeError("corrupt PDF")
         result, err = A.process_single_pdf(self._make_contents(), "bad.pdf")
         self.assertIsNone(result)
         self.assertIn("extraction failed", err)
 
-    @patch("app.extract_text_from_pdf")
-    @patch("app.analyze_with_llm")
-    def test_llm_exception_returns_error(self, mock_llm, mock_extract):
-        mock_extract.return_value = "valid text " * 20
+    @patch("callbacks.extract_text_from_pdf")
+    @patch("callbacks.analyze_with_llm")
+    @patch("callbacks._load_cache", return_value={})
+    def test_llm_exception_returns_error(self, _mock_cache, mock_llm, mock_extract):
+        mock_extract.return_value = ("valid text " * 20, {"page_count": 1, "ocr_used": False})
         mock_llm.side_effect      = RuntimeError("API quota exceeded")
         result, err = A.process_single_pdf(self._make_contents(), "report.pdf")
         self.assertIsNone(result)
         self.assertIn("LLM analysis failed", err)
 
-    @patch("app.extract_text_from_pdf")
-    @patch("app.analyze_with_llm")
-    @patch("app._load_cache")
-    @patch("app._save_cache")
+    @patch("callbacks.extract_text_from_pdf")
+    @patch("callbacks.analyze_with_llm")
+    @patch("callbacks._load_cache")
+    @patch("callbacks._save_cache")
     def test_cache_hit_skips_extraction_and_llm(self, mock_save, mock_load, mock_llm, mock_extract):
         """When a cache entry matches the file hash, extraction and LLM must not run."""
         raw_bytes  = b"%PDF-1.4 fake"
@@ -886,7 +885,7 @@ class TestRunPipeline(unittest.TestCase):
         )
         self.assertNotEqual(status["error"], "")
 
-    @patch("app.process_single_pdf")
+    @patch("callbacks.process_single_pdf")
     def test_results_accumulate_across_calls(self, mock_process):
         """New results are appended to existing ones — never replacing them."""
         existing          = [_sample_result("old.pdf", "OldWell")]
@@ -900,7 +899,7 @@ class TestRunPipeline(unittest.TestCase):
         self.assertEqual(result[0]["_source_file"], "old.pdf")
         self.assertEqual(result[1]["_source_file"], "new.pdf")
 
-    @patch("app.process_single_pdf")
+    @patch("callbacks.process_single_pdf")
     def test_multiple_pdfs_in_one_batch_all_appended(self, mock_process):
         mock_process.side_effect = [
             (_sample_result("a.pdf", "Well-A"), ""),
@@ -916,7 +915,7 @@ class TestRunPipeline(unittest.TestCase):
         self.assertEqual(len(result), 3)
         self.assertEqual(status["error"], "")
 
-    @patch("app.process_single_pdf")
+    @patch("callbacks.process_single_pdf")
     def test_partial_failure_keeps_successful_results(self, mock_process):
         """A failed PDF in a batch must not remove already-successful results."""
         mock_process.side_effect = [
@@ -932,7 +931,7 @@ class TestRunPipeline(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertIn("failed", status["error"].lower())
 
-    @patch("app.process_single_pdf")
+    @patch("callbacks.process_single_pdf")
     def test_wellbore_name_preserved_through_pipeline(self, mock_process):
         mock_process.return_value = (_sample_result("w.pdf", "Gullfaks C-04"), "")
         result, _, _ = A.run_pipeline(
@@ -942,7 +941,7 @@ class TestRunPipeline(unittest.TestCase):
         )
         self.assertEqual(result[0]["wellbore_name"], "Gullfaks C-04")
 
-    @patch("app.process_single_pdf")
+    @patch("callbacks.process_single_pdf")
     def test_single_file_not_in_list_normalised(self, mock_process):
         """When Dash passes a bare string+filename (not a list), it must be handled."""
         mock_process.return_value = (_sample_result("solo.pdf"), "")
@@ -954,7 +953,7 @@ class TestRunPipeline(unittest.TestCase):
         )
         self.assertEqual(len(result), 1)
 
-    @patch("app.process_single_pdf")
+    @patch("callbacks.process_single_pdf")
     def test_selected_provider_passed_to_process_single_pdf(self, mock_process):
         """The provider chosen in the UI dropdown must reach process_single_pdf."""
         mock_process.return_value = (_sample_result("x.pdf"), "")
@@ -965,7 +964,7 @@ class TestRunPipeline(unittest.TestCase):
         )
         self.assertEqual(mock_process.call_args.kwargs.get("provider"), "anthropic")
 
-    @patch("app.process_single_pdf")
+    @patch("callbacks.process_single_pdf")
     def test_all_files_fail_gives_non_done_step(self, mock_process):
         """If every file fails, the status step must not be 4 (the Done state)."""
         mock_process.return_value = (None, "total failure")
@@ -987,13 +986,13 @@ class TestLoadFromCache(unittest.TestCase):
         result, msg, cls = A.load_from_cache(0, [])
         self.assertIs(result, dash.no_update)
 
-    @patch("app._load_cache", return_value={})
+    @patch("callbacks._load_cache", return_value={})
     def test_empty_cache_returns_warning_class(self, _):
         result, msg, cls = A.load_from_cache(1, [])
         self.assertIs(result, dash.no_update)
         self.assertIn("warning", cls)
 
-    @patch("app._load_cache")
+    @patch("callbacks._load_cache")
     def test_valid_entries_merged_with_existing(self, mock_load):
         valid = _full_params("CachedWell")
         valid["_source_file"] = "cached.pdf"
@@ -1004,7 +1003,7 @@ class TestLoadFromCache(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertIn("ok", cls)
 
-    @patch("app._load_cache")
+    @patch("callbacks._load_cache")
     def test_entries_missing_param_keys_are_skipped(self, mock_load):
         """Cache entries that don't have all PARAM_LABELS keys must be excluded."""
         mock_load.return_value = {
@@ -1014,7 +1013,7 @@ class TestLoadFromCache(unittest.TestCase):
         self.assertIs(result, dash.no_update)
         self.assertIn("warning", cls)
 
-    @patch("app._load_cache")
+    @patch("callbacks._load_cache")
     def test_skip_count_reported_in_status_message(self, mock_load):
         """When entries are skipped, the count must appear in the message string."""
         valid = _full_params()

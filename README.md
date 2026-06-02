@@ -60,11 +60,16 @@ After cloning, your folder looks like this:
 
 ```
 well-report-analyzer/
-├── app_v4.py            ← the application
+├── app.py               ← entry point
+├── cache.py             ← cache read/write logic
+├── pdf_extract.py       ← PDF extraction and OCR fallback
+├── llm_clients.py       ← LLM provider calls (OpenAI / Anthropic / Gemini)
+├── layout.py            ← Dash app, UI layout, component builders
+├── callbacks.py         ← pipeline orchestration and Dash callbacks
 ├── test_app.py          ← unit tests
 ├── requirements.txt     ← Python dependencies
 ├── .env.example         ← API key template (copy this to .env)
-├── sample_pdfs/         ← sample well reports to test with
+├── Well_Reports/        ← sample well reports to test with
 ├── .gitignore
 └── README.md
 ```
@@ -156,7 +161,7 @@ Save the file. The `.env` file is listed in `.gitignore` so it will never be com
 
 ### Step 6 — Set the provider in the app
 
-Open `app_v4.py` in any text editor. Near the top (around line 44) you will see:
+Open `llm_clients.py` in any text editor. Near the top you will see:
 
 ```python
 LLM_PROVIDER = "gemini"   # options: "openai", "anthropic", "gemini"
@@ -169,7 +174,7 @@ Make sure this matches the provider whose key you added in Step 5. Save the file
 ### Step 7 — Run the app
 
 ```bash
-python app_v4.py
+python app.py
 ```
 
 You should see:
@@ -192,11 +197,11 @@ To stop it: press `Ctrl + C` in the terminal.
 
 ## Testing with the sample PDFs
 
-Sample well reports are included in the `sample_pdfs/` folder so you can test the app without needing your own documents.
+Sample well reports are included in the `Well_Reports/` folder so you can test the app without needing your own documents.
 
-1. Start the app (`python app_v4.py`)
+1. Start the app (`python app.py`)
 2. Open [http://127.0.0.1:8050](http://127.0.0.1:8050)
-3. Drag one or more PDF files from the `sample_pdfs/` folder into the upload zone, or click the zone to browse
+3. Drag one or more PDF files from the `Well_Reports/` folder into the upload zone, or click the zone to browse
 4. Watch the pipeline stepper — **Upload → Extract → Analyze → Done** — as each file is processed
 5. Results appear as a table once processing finishes. Each file is one row
 6. Click **Download Results** to save the table as a CSV
@@ -215,14 +220,14 @@ pytest test_app.py -v
 
 Expected output:
 ```
-======================== 120 passed, 1 skipped in Xs ========================
+======================== 121 passed in Xs ========================
 ```
 
-The one skipped test is documented — it covers a guard that can only be verified once the Gemini key is confirmed to come exclusively from the `.env` file.
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs this suite automatically on every push and pull request, so a broken import or failing test is caught before it reaches the repository.
 
 For a coverage report:
 ```bash
-pytest test_app.py -v --cov=app_v4 --cov-report=term-missing
+pytest test_app.py -v --cov=app --cov=cache --cov=pdf_extract --cov=llm_clients --cov=layout --cov=callbacks --cov-report=term-missing
 ```
 
 ---
@@ -251,18 +256,14 @@ After installing, add the Tesseract `bin` folder to your **system PATH** so the 
 | macOS | `brew install poppler` |
 | Linux | `sudo apt install poppler-utils` |
 
-**If you are on a Windows machine where you cannot edit system PATH** (e.g. a university or corporate laptop), you can hard-code the paths directly in `app_v4.py` instead. Find this block near the top of the file:
+**If you are on a Windows machine where you cannot edit system PATH** (e.g. a university or corporate laptop), add the two paths to your `.env` file instead:
 
-```python
-_TESSERACT_EXE = (
-    r"C:\Users\2930332\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
-)
-_POPPLER_BIN = (
-    r"C:\Users\2930332\AppData\Local\Programs\poppler\poppler-26.02.0\Library\bin"
-)
+```
+TESSERACT_EXE=C:\path\to\Tesseract-OCR\tesseract.exe
+POPPLER_BIN=C:\path\to\poppler\Library\bin
 ```
 
-Update both paths to match where **you** installed Tesseract and Poppler. Each block checks `os.path.exists(...)` first, so on any machine where these paths don't exist, the blocks do nothing — there are no side-effects on other people's machines.
+Replace the example paths with where **you** installed Tesseract and Poppler. The app reads these at startup and configures the tools automatically. Each variable is optional — if it is not set or the path does not exist, the block does nothing.
 
 ---
 
@@ -273,7 +274,7 @@ The app supports three providers. You can switch at any time:
 **Method A — Dropdown in the UI** (no restart needed):
 Use the **LLM Provider** dropdown below the upload zone.
 
-**Method B — Edit the default in `app_v4.py`:**
+**Method B — Edit the default in `llm_clients.py`:**
 
 ```python
 LLM_PROVIDER = "gemini"   # change to "openai" or "anthropic"
@@ -293,12 +294,17 @@ Make sure the matching key is in your `.env`:
 
 | File / Folder | What it is |
 |---|---|
-| `app_v4.py` | The entire application — UI, pipeline, PDF extraction, LLM calls |
+| `app.py` | Entry point — loads config, applies the httpx proxy patch, starts the server |
+| `cache.py` | Cache read/write logic (`_load_cache`, `_save_cache`, `CACHE_FILE`) |
+| `pdf_extract.py` | PDF text extraction and OCR fallback (`extract_text_from_pdf`) |
+| `llm_clients.py` | LLM provider calls for OpenAI, Anthropic, and Gemini (`analyze_with_llm`) |
+| `layout.py` | Dash app object, UI layout, component builders, and pipeline constants |
+| `callbacks.py` | Pipeline orchestration (`process_single_pdf`) and all Dash callbacks |
 | `test_app.py` | 121 unit tests covering every function; all mocked, no real API calls |
 | `requirements.txt` | All pip dependencies, pinned to working versions |
 | `.env.example` | Template showing which keys are needed — copy to `.env` and fill in |
 | `.env` | Your real API keys — created by you locally, never committed to Git |
-| `sample_pdfs/` | Sample well reports included so you can test without your own files |
+| `Well_Reports/` | Sample well reports included so you can test without your own files |
 | `temp/` | Auto-created — uploaded PDFs are saved here temporarily during processing and deleted afterwards |
 | `.cache/` | Auto-created — used by Dash's background task manager to stream live progress updates |
 | `well_cache.json` | Auto-created — stores extracted results so the same PDF is never processed twice; excluded from Git |
@@ -320,16 +326,16 @@ These power the live progress stepper. Run `pip install diskcache multiprocess`.
 The background task manager couldn't start a subprocess. Make sure `diskcache` and `multiprocess` are installed and the `.cache/` folder is writable. On some Windows machines antivirus software blocks subprocess creation — try temporarily whitelisting your project folder.
 
 **`TesseractNotFoundError`**
-Tesseract is not on your PATH. Either install it and add it to PATH (see the OCR section above), or hard-code the path in `app_v4.py` as described there. This error only happens on scanned PDFs — the sample PDFs will work fine without Tesseract.
+Tesseract is not on your PATH. Either install it and add it to PATH (see the OCR section above), or hard-code the path in `app.py` as described there. This error only happens on scanned PDFs — the sample PDFs will work fine without Tesseract.
 
 **`Unable to get page count. Is poppler installed and in PATH?`**
 Same situation as above but for Poppler. Only affects scanned PDFs.
 
 **LLM returns garbled or incomplete JSON**
-This can happen with very long PDFs. Increase `max_tokens` in the `analyze_with_llm()` function inside `app_v4.py` (currently `1024`).
+This can happen with very long PDFs. Increase `max_tokens` in the `analyze_with_llm()` function inside `llm_clients.py` (currently `1024`).
 
 **Port 8050 is already in use**
-Another Dash app is already running. Stop it with `Ctrl + C`, or change the port in the last line of `app_v4.py`:
+Another Dash app is already running. Stop it with `Ctrl + C`, or change the port in the last line of `app.py`:
 ```python
 app.run(debug=False, host="0.0.0.0", port=8051)
 ```
