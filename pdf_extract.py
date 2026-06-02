@@ -71,7 +71,7 @@ def extract_text_from_pdf(pdf_path: str) -> tuple:
 
             try:
                 probe = page.extract_text() or ""
-            except (ValueError, AttributeError, OSError):
+            except (ValueError, AttributeError, OSError, RuntimeError):
                 probe = ""
 
             if len(probe.strip()) >= OCR_THRESHOLD:
@@ -80,7 +80,7 @@ def extract_text_from_pdf(pdf_path: str) -> tuple:
                     raw_text = page.extract_text() or ""
                     if raw_text.strip():
                         page_parts.append(raw_text)
-                except (ValueError, AttributeError, OSError) as e:
+                except (ValueError, AttributeError, OSError, RuntimeError) as e:
                     page_parts.append(f"[TEXT ERROR page {page_num}: {e}]")
 
                 try:
