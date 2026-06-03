@@ -252,6 +252,13 @@ body {
     transition: border-color 0.2s, color 0.2s;
 }
 .btn-secondary:hover { border-color: var(--amber); color: var(--amber); }
+.btn-success {
+    background: #2ea043; color: #0d1117; border: none;
+    border-radius: 8px; padding: 10px 20px; font-family: var(--mono);
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    letter-spacing: 0.5px; transition: opacity 0.2s;
+}
+.btn-success:hover { opacity: 0.85; }
 
 .totals-bar  { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
 .totals-chip {
@@ -808,7 +815,7 @@ app.layout = html.Div([
             html.Button(
                 "Validate Sample Results",
                 id="btn-validate",
-                className="btn-secondary",
+                className="btn-success",
                 n_clicks=0,
                 title=(
                     f"Compare extracted values against verified reference data "
