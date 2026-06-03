@@ -776,9 +776,11 @@ class TestProcessSinglePdf(unittest.TestCase):
         self.assertIsNone(result)
         self.assertIn("MB", err)
 
+    @patch("callbacks._save_cache")
+    @patch("callbacks._load_cache", return_value={})
     @patch("callbacks.extract_text_from_pdf")
     @patch("callbacks.analyze_with_llm")
-    def test_happy_path_returns_all_15_param_keys(self, mock_llm, mock_extract):
+    def test_happy_path_returns_all_15_param_keys(self, mock_llm, mock_extract, _mock_load, _mock_save):
         mock_extract.return_value = ("Drilling report text " * 10, {"page_count": 1, "ocr_used": False})
         mock_llm.return_value     = (_full_params("15/9-F-11 T2"), {"input_tokens": 0, "output_tokens": 0, "model_name": ""})
         result, err = A.process_single_pdf(self._make_contents(), "well.pdf")
@@ -786,18 +788,22 @@ class TestProcessSinglePdf(unittest.TestCase):
         param_keys = set(result.keys()) - {"_source_file", "_meta"}
         self.assertEqual(param_keys, set(A.PARAM_LABELS.keys()))
 
+    @patch("callbacks._save_cache")
+    @patch("callbacks._load_cache", return_value={})
     @patch("callbacks.extract_text_from_pdf")
     @patch("callbacks.analyze_with_llm")
-    def test_happy_path_includes_wellbore_name(self, mock_llm, mock_extract):
+    def test_happy_path_includes_wellbore_name(self, mock_llm, mock_extract, _mock_load, _mock_save):
         mock_extract.return_value = ("Drilling report text " * 10, {"page_count": 1, "ocr_used": False})
         mock_llm.return_value     = (_full_params("15/9-F-11 T2"), {"input_tokens": 0, "output_tokens": 0, "model_name": ""})
         result, _  = A.process_single_pdf(self._make_contents(), "well.pdf")
         self.assertEqual(result["wellbore_name"], "15/9-F-11 T2")
         self.assertEqual(result["_source_file"],  "well.pdf")
 
+    @patch("callbacks._save_cache")
+    @patch("callbacks._load_cache", return_value={})
     @patch("callbacks.extract_text_from_pdf")
     @patch("callbacks.analyze_with_llm")
-    def test_result_contains_meta_dict_with_required_fields(self, mock_llm, mock_extract):
+    def test_result_contains_meta_dict_with_required_fields(self, mock_llm, mock_extract, _mock_load, _mock_save):
         """Every successful result must have a _meta dict with all provenance fields."""
         mock_extract.return_value = ("text " * 20, {"page_count": 1, "ocr_used": False})
         mock_llm.return_value     = (_full_params(), {"input_tokens": 0, "output_tokens": 0, "model_name": ""})
