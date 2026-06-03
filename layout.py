@@ -13,20 +13,21 @@ from dash import dcc, html, DiskcacheManager
 import dash_bootstrap_components as dbc
 import diskcache
 
-from cache import CACHE_FILE
+from cache import CACHE_FILE, VALIDATION_FILE
 from llm_clients import PARAM_LABELS, LLM_PROVIDER
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SHARED CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
-MAX_UPLOAD_SIZE_MB = 50         # reject files larger than this
-TEMP_FOLDER        = "./temp"   # temporary folder for uploaded PDFs
+_HERE              = os.path.dirname(os.path.abspath(__file__))
+MAX_UPLOAD_SIZE_MB = 50
+TEMP_FOLDER        = os.path.join(_HERE, "temp")
 
 # ── Long-callback (background) manager ────────────────────────────────────────
 # Backs the `run_pipeline` long_callback so it can run in a subprocess and push
 # live step-progress updates to the stepper via `set_progress`.  The cache
 # folder is created automatically.  Diskcache + multiprocess are required.
-CACHE_FOLDER = "./.cache"
+CACHE_FOLDER = os.path.join(_HERE, ".cache")
 os.makedirs(CACHE_FOLDER, exist_ok=True)
 long_callback_manager = DiskcacheManager(diskcache.Cache(CACHE_FOLDER))
 
@@ -176,8 +177,9 @@ body {
     border-radius: 6px; padding: 4px 10px;
     font-family: var(--mono); font-size: 11px; color: var(--amber);
 }
-.file-badge.error { background: var(--red-dim); border-color: var(--red); color: var(--red); }
-.file-badge.done  { background: rgba(63,185,80,0.1); border-color: var(--green); color: var(--green); }
+.file-badge.error   { background: var(--red-dim); border-color: var(--red); color: var(--red); }
+.file-badge.done    { background: rgba(63,185,80,0.1); border-color: var(--green); color: var(--green); }
+.file-badge.pending { background: rgba(88,166,255,0.1); border-color: var(--blue); color: var(--blue); }
 
 /* ── RESULTS TABLE ────────────────────────────────────────────────────────── */
 .results-wrapper { overflow-x: auto; }
@@ -283,7 +285,116 @@ body {
 .meta-table tr:hover td { background: rgba(255,255,255,0.02); }
 .meta-value-time   { color: var(--blue)  !important; }
 .meta-value-tokens { color: var(--green) !important; }
+.meta-value-warn   { color: var(--amber) !important; font-weight: 600; }
+.ocr-warn-badge {
+    display: inline-block; margin-left: 7px;
+    background: rgba(230,168,23,0.12); border: 1px solid var(--amber-dim);
+    border-radius: 4px; padding: 1px 6px;
+    font-family: var(--mono); font-size: 10px; color: var(--amber);
+    white-space: nowrap; cursor: default;
+}
 .meta-ctrl-row { display: flex; gap: 10px; align-items: center; margin-bottom: 0; }
+
+/* ── VALIDATION TABLE ─────────────────────────────────────────────────────── */
+.val-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 700px; }
+.val-table th {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px;
+    color: var(--text-muted); text-transform: uppercase; padding: 8px 12px;
+    text-align: left; border-bottom: 1px solid var(--border);
+    white-space: nowrap; font-weight: 500;
+}
+.val-table td {
+    padding: 9px 12px; border-bottom: 1px solid rgba(48,54,61,0.4);
+    font-family: var(--mono); font-size: 11px;
+}
+.val-table tr:last-child td { border-bottom: none; }
+.val-table tr:hover td { background: rgba(255,255,255,0.02); }
+.val-badge-pass {
+    display: inline-block;
+    background: var(--green-dim); border: 1px solid var(--green);
+    border-radius: 4px; padding: 2px 8px;
+    font-family: var(--mono); font-size: 10px; color: var(--green); font-weight: 600;
+}
+.val-badge-fail {
+    display: inline-block;
+    background: var(--red-dim); border: 1px solid var(--red);
+    border-radius: 4px; padding: 2px 8px;
+    font-family: var(--mono); font-size: 10px; color: var(--red); font-weight: 600;
+}
+.val-summary {
+    font-family: var(--mono); font-size: 12px; color: var(--text-muted);
+    margin-top: 14px; padding: 10px 14px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg-primary);
+}
+.val-summary .ok   { color: var(--green); font-weight: 600; }
+.val-summary .fail { color: var(--red);   font-weight: 600; }
+.val-well-header {
+    font-family: var(--mono); font-size: 12px; color: var(--blue);
+    margin-bottom: 12px; margin-top: 20px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+}
+.val-well-header:first-child { margin-top: 0; }
+
+/* ── DIFF SECTION ─────────────────────────────────────────────────────────── */
+.diff-file-header {
+    font-family: var(--mono); font-size: 12px; color: var(--text-primary);
+    margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.diff-count-badge {
+    background: rgba(230,168,23,0.15); border: 1px solid var(--amber-dim);
+    border-radius: 4px; padding: 2px 8px;
+    font-family: var(--mono); font-size: 10px; color: var(--amber);
+}
+.diff-same-badge {
+    background: rgba(63,185,80,0.10); border: 1px solid rgba(63,185,80,0.3);
+    border-radius: 4px; padding: 2px 8px;
+    font-family: var(--mono); font-size: 10px; color: var(--green);
+}
+.diff-no-change { font-family: var(--mono); font-size: 12px; color: var(--green); padding: 8px 0; }
+.diff-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 700px; }
+.diff-table th {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px;
+    color: var(--text-muted); text-transform: uppercase; padding: 8px 12px;
+    text-align: left; border-bottom: 1px solid var(--border);
+    white-space: nowrap; font-weight: 500;
+}
+.diff-table td {
+    padding: 9px 12px; border-bottom: 1px solid rgba(48,54,61,0.4);
+    font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+}
+.diff-row-changed { background: rgba(230,168,23,0.04) !important; }
+.diff-row-changed td:first-child { color: var(--text-primary); font-weight: 600; }
+.diff-val-old  { color: var(--red)   !important; }
+.diff-val-new  { color: var(--green) !important; font-weight: 600; }
+.diff-val-same { color: var(--text-muted) !important; font-style: italic; }
+.diff-table tr:last-child td { border-bottom: none; }
+.diff-separator { height: 1px; background: var(--border); margin: 22px 0; }
+
+/* ── MODAL DARK THEME ─────────────────────────────────────────────────────── */
+.modal-content  { background: var(--bg-card)    !important; border: 1px solid var(--border) !important;
+                  border-radius: 12px !important; }
+.modal-header   { border-bottom: 1px solid var(--border) !important;
+                  background: var(--bg-surface) !important;
+                  border-radius: 12px 12px 0 0  !important; padding: 16px 20px !important; }
+.modal-title    { font-family: var(--display) !important; font-size: 16px !important;
+                  color: var(--text-primary)  !important; }
+.modal-body     { color: var(--text-primary)  !important; padding: 20px !important; }
+.modal-footer   { border-top: 1px solid var(--border) !important;
+                  background: var(--bg-card)  !important;
+                  border-radius: 0 0 12px 12px !important;
+                  padding: 14px 20px !important; gap: 10px !important; }
+.btn-close      { filter: invert(1) !important; }
+.modal-hit-item {
+    background: var(--bg-primary); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px 14px; margin-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 6px;
+}
+.modal-hit-filename { font-family: var(--mono); font-size: 12px; color: var(--amber); }
+.modal-hit-meta     { font-family: var(--mono); font-size: 10px; color: var(--text-muted); }
+.modal-question     { font-family: var(--sans); font-size: 13px; color: var(--text-muted);
+                      line-height: 1.5; margin-top: 14px; }
 .meta-divider  { height: 1px; background: var(--border); margin: 18px 0; }
 
 /* ── CACHE LOAD ROW ───────────────────────────────────────────────────────── */
@@ -436,8 +547,22 @@ def build_results_table(results: list) -> html.Div:
     ]
     rows = []
     for r in results:
-        src   = r.get("_source_file", "")
-        cells = [html.Td(src, title=src)]
+        src      = r.get("_source_file", "")
+        m        = r.get("_meta", {})
+        skipped  = m.get("ocr_pages_skipped", 0) or 0
+        src_cell = html.Td(
+            [
+                html.Span(src, title=src),
+                html.Span(
+                    f" ⚠ {skipped} page{'s' if skipped != 1 else ''} not OCR'd",
+                    className="ocr-warn-badge",
+                    title="These pages were scanned/image-only but Tesseract/Poppler were not found. "
+                          "Their text was not extracted, which may cause 'Not stated' results.",
+                ),
+            ] if skipped else src,
+            title=src,
+        )
+        cells = [src_cell]
         for key in param_keys:
             cells.append(_value_td(r.get(key, "Not stated")))
         rows.append(html.Tr(cells))
@@ -478,15 +603,17 @@ def build_metadata_table(results: list) -> html.Div:
     """Render the per-PDF metadata table (shown inside the collapsible section)."""
     header_cells = [html.Th(h) for h in [
         "Source File", "Timestamp", "LLM Provider", "LLM Model",
-        "Pages", "OCR Used", "Extraction (s)", "LLM (s)",
+        "Pages", "OCR Used", "OCR Pages", "OCR Skipped", "Extraction (s)", "LLM (s)",
         "Input Tokens", "Output Tokens",
     ]]
     rows = []
     for r in results:
-        m   = r.get("_meta", {})
-        src = r.get("_source_file", "")
-        inp = m.get("input_tokens",  0)
-        out = m.get("output_tokens", 0)
+        m        = r.get("_meta", {})
+        src      = r.get("_source_file", "")
+        inp      = m.get("input_tokens",  0)
+        out      = m.get("output_tokens", 0)
+        skipped  = m.get("ocr_pages_skipped", 0) or 0
+        done     = m.get("ocr_pages_done",    0) or 0
         cells = [
             html.Td(src, title=src),
             html.Td(m.get("timestamp", "—")),
@@ -494,6 +621,11 @@ def build_metadata_table(results: list) -> html.Div:
             html.Td(m.get("llm_model", "—")),
             html.Td(str(m.get("page_count", "—"))),
             html.Td(m.get("ocr_used", "—")),
+            html.Td(str(done),    className="meta-value-tokens"),
+            html.Td(
+                str(skipped) if skipped == 0 else f"⚠ {skipped}",
+                className="meta-value-time" if skipped == 0 else "meta-value-warn",
+            ),
             html.Td(f"{m.get('extraction_time_s', '—')} s", className="meta-value-time"),
             html.Td(f"{m.get('llm_time_s', '—')} s",        className="meta-value-time"),
             html.Td(f"{inp:,}" if isinstance(inp, int) else "—", className="meta-value-tokens"),
@@ -507,6 +639,63 @@ def build_metadata_table(results: list) -> html.Div:
         ),
         className="results-wrapper",
     )
+
+
+def build_diff_section(diffs: list) -> list:
+    """
+    Build the body of the 05-Comparison card.
+
+    diffs: list of {
+        "filename":  str,
+        "cached_ts": str,
+        "new_ts":    str,
+        "changed":   [{"key", "label", "cached_val", "new_val"}],
+        "unchanged": [{"key", "label", "val"}],
+    }
+    Returns a list of Dash components (caller prepends the section label).
+    """
+    if not diffs:
+        return [html.Div("No differences found — new results match the cache exactly.",
+                         className="diff-no-change")]
+
+    sections = []
+    for i, d in enumerate(diffs):
+        if i > 0:
+            sections.append(html.Div(className="diff-separator"))
+
+        n_changed   = len(d.get("changed",   []))
+        n_unchanged = len(d.get("unchanged", []))
+
+        hdr = [html.Span(d["filename"], style={"color": "var(--blue)"})]
+        if n_changed:
+            hdr.append(html.Span(f"{n_changed} changed", className="diff-count-badge"))
+        hdr.append(html.Span(f"{n_unchanged} same", className="diff-same-badge"))
+        sections.append(html.Div(hdr, className="diff-file-header"))
+
+        col_headers = html.Thead(html.Tr([
+            html.Th("Parameter"),
+            html.Th(f"Cached  ({d.get('cached_ts', '—')})"),
+            html.Th(f"New  ({d.get('new_ts', '—')})"),
+        ]))
+        rows = []
+        for c in d.get("changed", []):
+            rows.append(html.Tr([
+                html.Td(c["label"]),
+                html.Td(c["cached_val"] or "Not stated", className="diff-val-old"),
+                html.Td(c["new_val"]    or "Not stated", className="diff-val-new"),
+            ], className="diff-row-changed"))
+        for u in d.get("unchanged", []):
+            rows.append(html.Tr([
+                html.Td(u["label"]),
+                html.Td(u["val"] or "Not stated", className="diff-val-same"),
+                html.Td("✓ same",                 className="diff-val-same"),
+            ]))
+        sections.append(html.Div(
+            html.Table([col_headers, html.Tbody(rows)], className="diff-table"),
+            className="results-wrapper",
+        ))
+
+    return sections
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -614,6 +803,37 @@ app.layout = html.Div([
             children=html.Div(id="results-card", style={"display": "none"}),
         ),
 
+        # ── Validate button row (shown only when sample wells are present) ──
+        html.Div([
+            html.Button(
+                "Validate Sample Results",
+                id="btn-validate",
+                className="btn-secondary",
+                n_clicks=0,
+                title=(
+                    f"Compare extracted values against verified reference data "
+                    f"in {VALIDATION_FILE}"
+                ),
+            ),
+            html.Span(
+                "Compare against manually verified reference values for the included sample PDFs",
+                className="hint-text",
+            ),
+        ], id="validate-btn-row", style={"display": "none"}, className="btn-row"),
+
+        # ── 06 Validation Results (inline, hidden until validate is clicked) ─
+        html.Div([
+            html.Div("06 - Validation Results", className="section-label"),
+            html.Button(
+                "Close Validation",
+                id="btn-close-validation",
+                className="btn-secondary",
+                n_clicks=0,
+                style={"marginBottom": "16px"},
+            ),
+            html.Div(id="validation-content"),
+        ], id="validation-card", style={"display": "none"}, className="section-card"),
+
         # ── 04 Performance & Metadata (collapsible) ───────────────────────
         html.Div([
             html.Div("04 - Performance & Metadata", className="section-label"),
@@ -645,10 +865,34 @@ app.layout = html.Div([
             ),
         ], id="meta-card", style={"display": "none"}, className="section-card"),
 
+        # ── 05 Comparison (cache vs reprocessed) — hidden until a diff exists ──
+        html.Div([
+            html.Div("05 - Comparison  (Cache vs Reprocessed)", className="section-label"),
+            html.Div(id="diff-content"),
+            html.Div([
+                html.Button("✓ Accept New Results",   id="btn-accept-diff", className="btn-primary",  n_clicks=0),
+                html.Button("✕ Reject / Keep Cached", id="btn-reject-diff", className="btn-danger",   n_clicks=0),
+            ], id="diff-action-row", style={"display": "none"}, className="btn-row"),
+        ], id="diff-card", style={"display": "none"}, className="section-card"),
+
+        # ── Cache-hit modal ───────────────────────────────────────────────────
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Cached Results Found")),
+            dbc.ModalBody(html.Div(id="modal-body-content")),
+            dbc.ModalFooter([
+                html.Button("Load from Cache",     id="btn-use-cache",  className="btn-primary",   n_clicks=0),
+                html.Button("Reprocess & Compare", id="btn-reprocess",  className="btn-secondary", n_clicks=0),
+            ]),
+        ], id="cache-hit-modal", is_open=False, centered=True),
+
         # Hidden state stores
-        dcc.Store(id="pipeline-results",  data=[]),         # list of result dicts
+        dcc.Store(id="pipeline-results",  data=[]),
         dcc.Store(id="pipeline-status",   data={"step": 0, "error": ""}),
         dcc.Store(id="selected-provider", data=LLM_PROVIDER),
+        dcc.Store(id="run-trigger",       data=None),
+        dcc.Store(id="pending-upload",    data=None),
+        dcc.Store(id="cache-hit-info",    data=[]),
+        dcc.Store(id="diff-store",        data={}),
         dcc.Download(id="download-csv"),
         dcc.Download(id="download-metadata-csv"),
 

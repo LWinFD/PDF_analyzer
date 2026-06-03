@@ -2,6 +2,7 @@
 callbacks.py — Pipeline helpers, CSV export, and all Dash callbacks.
 """
 import os
+import csv as _csv
 import base64
 import binascii
 import json
@@ -11,14 +12,15 @@ from datetime import datetime
 
 import dash
 from dash import html, Input, Output, State
+import dash_bootstrap_components as dbc  # noqa: F401 (needed for dbc.Modal in layout)
 
-from cache import CACHE_FILE, _load_cache, _save_cache
+from cache import CACHE_FILE, VALIDATION_FILE, _load_cache, _save_cache
 from pdf_extract import extract_text_from_pdf
 from llm_clients import LLM_PROVIDER, PARAM_LABELS, analyze_with_llm
 from layout import (
     app, long_callback_manager, _build_stepper,
     MAX_UPLOAD_SIZE_MB, TEMP_FOLDER,
-    build_results_table, build_totals_bar, build_metadata_table,
+    build_results_table, build_totals_bar, build_metadata_table, build_diff_section,
 )
 
 # ── Inline style for the neutral "queued" badges ─────────────────────────────
@@ -35,6 +37,144 @@ _QUEUED_BADGE_STYLE = {
     "color":        "#8b949e",
     "letterSpacing": "0.5px",
 }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VALIDATION HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+# Normalized substrings (hyphens/spaces → underscores, lowercase) that uniquely
+# identify each sample PDF regardless of its full filename.
+_SAMPLE_WELL_PATTERNS = ("6608_11_3", "6608_10_13")
+_SAMPLE_WELL_LABELS   = {"6608_11_3": "6608/11-3", "6608_10_13": "6608/10-13"}
+
+# Reverse map: CSV display header → PARAM_LABELS key (built once at import time)
+_LABEL_TO_KEY = {v: k for k, v in PARAM_LABELS.items()}
+
+
+def _norm_filename(name: str) -> str:
+    """Lowercase the stem, replace hyphens/spaces with underscores."""
+    stem = os.path.splitext(name)[0]
+    return stem.lower().replace("-", "_").replace(" ", "_")
+
+
+def _match_sample_wells(results: list) -> dict:
+    """
+    Return {pattern: result_dict} for sample wells present in results.
+    Matching is done on normalised filename stems, so it is robust to
+    case differences and hyphen/space/underscore variations.
+    """
+    found = {}
+    for r in results:
+        src_norm = _norm_filename(r.get("_source_file", ""))
+        for pat in _SAMPLE_WELL_PATTERNS:
+            if pat in src_norm and pat not in found:
+                found[pat] = r
+    return found
+
+
+def _build_validation_content(results: list):
+    """
+    Build the body of the validation card.
+
+    Reads Validation.csv, matches rows to results by normalised filename,
+    then compares each of the 15 parameters.  Returns a list of Dash
+    components ready to be placed in validation-content.children.
+    """
+    if not os.path.exists(VALIDATION_FILE):
+        return [html.Div(
+            f"Validation file not found: {VALIDATION_FILE}",
+            className="alert-error",
+        )]
+
+    # Load expected rows keyed by normalised source filename
+    expected_by_norm: dict = {}
+    try:
+        with open(VALIDATION_FILE, newline="", encoding="utf-8-sig") as f:
+            reader = _csv.DictReader(f)
+            for row in reader:
+                key = _norm_filename(row.get("Source File", ""))
+                expected_by_norm[key] = row
+    except (OSError, _csv.Error) as exc:
+        return [html.Div(f"Could not read {VALIDATION_FILE}: {exc}", className="alert-error")]
+
+    matched = _match_sample_wells(results)
+    if not matched:
+        return [html.Div("No sample wells found in the current results.", className="alert-error")]
+
+    sections = []
+    param_keys = list(PARAM_LABELS.keys())
+
+    for pat in _SAMPLE_WELL_PATTERNS:   # deterministic order
+        if pat not in matched:
+            continue
+        result   = matched[pat]
+        label    = _SAMPLE_WELL_LABELS[pat]
+        src_norm = _norm_filename(result.get("_source_file", ""))
+
+        # Find the expected row whose normalised filename matches the result
+        exp_row = expected_by_norm.get(src_norm)
+        if exp_row is None:
+            # Fallback: try substring matching (handles minor filename differences)
+            for k, v in expected_by_norm.items():
+                if pat in k:
+                    exp_row = v
+                    break
+
+        if exp_row is None:
+            sections.append(html.Div(
+                f"No expected-value row found for well {label} in {VALIDATION_FILE}.",
+                className="alert-error",
+            ))
+            continue
+
+        rows   = []
+        passed = 0
+        for key in param_keys:
+            col_label    = PARAM_LABELS[key]
+            extracted    = (result.get(key) or "Not stated").strip()
+            expected_val = (exp_row.get(col_label) or "").strip()
+
+            if not expected_val:
+                badge    = html.Span("—", style={"color": "var(--text-muted)"})
+                expected_display = html.Td("—", style={"color": "var(--text-muted)", "fontStyle": "italic"})
+            elif extracted.lower() == expected_val.lower():
+                passed  += 1
+                badge    = html.Span("PASS", className="val-badge-pass")
+                expected_display = html.Td(expected_val)
+            else:
+                badge    = html.Span("FAIL", className="val-badge-fail")
+                expected_display = html.Td(expected_val, style={"color": "var(--red)"})
+
+            rows.append(html.Tr([
+                html.Td(col_label),
+                expected_display,
+                html.Td(extracted),
+                html.Td(badge),
+            ]))
+
+        scored_total = sum(1 for key in param_keys if (exp_row.get(PARAM_LABELS[key]) or "").strip())
+        failed       = scored_total - passed
+
+        sections.append(html.Div(f"Well: {label}", className="val-well-header"))
+        sections.append(html.Div(
+            html.Table([
+                html.Thead(html.Tr([
+                    html.Th("Parameter"),
+                    html.Th("Expected"),
+                    html.Th("Extracted"),
+                    html.Th("Result"),
+                ])),
+                html.Tbody(rows),
+            ], className="val-table"),
+            className="results-wrapper",
+        ))
+        sections.append(html.Div([
+            html.Span(f"{passed}/{scored_total}", className="ok" if failed == 0 else "fail"),
+            f" parameters matched for well {label}.",
+            " All correct!" if failed == 0 else f" {failed} mismatch{'es' if failed > 1 else ''}.",
+        ], className="val-summary"))
+
+    return sections
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -66,7 +206,8 @@ def metadata_to_csv(results: list) -> str:
     """
     header = [
         "Source File", "Timestamp", "LLM Provider", "LLM Model",
-        "Pages", "OCR Used", "Extraction Time (s)", "LLM Time (s)",
+        "Pages", "OCR Used", "OCR Pages Done", "OCR Pages Skipped",
+        "Extraction Time (s)", "LLM Time (s)",
         "Input Tokens", "Output Tokens",
     ]
     lines = [",".join(f'"{h}"' for h in header)]
@@ -79,6 +220,8 @@ def metadata_to_csv(results: list) -> str:
             m.get("llm_model", ""),
             str(m.get("page_count", "")),
             m.get("ocr_used", ""),
+            str(m.get("ocr_pages_done",    0)),
+            str(m.get("ocr_pages_skipped", 0)),
             str(m.get("extraction_time_s", "")),
             str(m.get("llm_time_s", "")),
             str(m.get("input_tokens", "")),
@@ -100,7 +243,7 @@ def _cleanup(path: str):
         pass
 
 
-def process_single_pdf(contents: str, filename: str, progress_cb=None, provider: str = None) -> tuple:
+def process_single_pdf(contents: str, filename: str, progress_cb=None, provider: str = None, force_reprocess: bool = False, write_cache: bool = True) -> tuple:
     """
     Full pipeline for one PDF: validate → decode → extract → analyze.
 
@@ -143,15 +286,13 @@ def process_single_pdf(contents: str, filename: str, progress_cb=None, provider:
         provider = LLM_PROVIDER
 
     # ── Cache check ──────────────────────────────────────────────────────────
-    # Hash the raw bytes so renamed copies of the same PDF are still recognised.
-    # The key is prefixed with the active LLM provider so the same PDF processed
-    # by different providers gets its own independent cache entry.
     cache_key = f"{provider}:{hashlib.sha256(file_bytes).hexdigest()}"
-    cache     = _load_cache()
-    if cache_key in cache:
-        cached = cache[cache_key].copy()
-        cached["_source_file"] = filename   # reflect the current filename
-        return cached, ""
+    if not force_reprocess:
+        cache = _load_cache()
+        if cache_key in cache:
+            cached = cache[cache_key].copy()
+            cached["_source_file"] = filename
+            return cached, ""
 
     temp_path = os.path.join(TEMP_FOLDER, filename)
     try:
@@ -205,6 +346,8 @@ def process_single_pdf(contents: str, filename: str, progress_cb=None, provider:
         "llm_model":         llm_meta.get("model_name", ""),
         "page_count":        extract_meta.get("page_count", 0),
         "ocr_used":          "Yes" if extract_meta.get("ocr_used") else "No",
+        "ocr_pages_done":    extract_meta.get("ocr_pages_done",    0),
+        "ocr_pages_skipped": extract_meta.get("ocr_pages_skipped", 0),
         "extraction_time_s": t_extract,
         "llm_time_s":        t_llm,
         "input_tokens":      llm_meta.get("input_tokens", 0),
@@ -212,16 +355,45 @@ def process_single_pdf(contents: str, filename: str, progress_cb=None, provider:
     }
 
     # ── Write to cache ───────────────────────────────────────────────────────
+    # Skipped when write_cache=False (reprocess mode: user must Accept first).
     # Reload before writing so parallel batches don't overwrite each other's
     # entries — re-reading first keeps as many prior entries as possible.
-    try:
-        fresh_cache = _load_cache()
-        fresh_cache[cache_key] = result.copy()
-        _save_cache(fresh_cache)
-    except (OSError, json.JSONDecodeError):
-        pass   # cache write failure is non-fatal — result still returned
+    if write_cache:
+        try:
+            fresh_cache = _load_cache()
+            fresh_cache[cache_key] = result.copy()
+            _save_cache(fresh_cache)
+        except (OSError, json.JSONDecodeError):
+            pass
 
     return result, ""
+
+
+def _compute_diff(filename: str, old_result: dict, new_result: dict) -> dict | None:
+    """
+    Compare two result dicts on PARAM_LABELS keys.
+    Returns a diff dict for build_diff_section, or None if nothing changed.
+    """
+    changed   = []
+    unchanged = []
+    for key, label in PARAM_LABELS.items():
+        old_val = (old_result.get(key) or "Not stated").strip()
+        new_val = (new_result.get(key) or "Not stated").strip()
+        if old_val != new_val:
+            changed.append({"key": key, "label": label, "cached_val": old_val, "new_val": new_val})
+        else:
+            unchanged.append({"key": key, "label": label, "val": old_val})
+
+    if not changed:
+        return None
+
+    return {
+        "filename":   filename,
+        "cached_ts":  (old_result.get("_meta") or {}).get("timestamp", "—"),
+        "new_ts":     (new_result.get("_meta") or {}).get("timestamp", "—"),
+        "changed":    changed,
+        "unchanged":  unchanged,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -256,110 +428,371 @@ def show_queued_files(filenames):
     return html.Div(badges, className="file-queue")
 
 
+@app.callback(
+    Output("pending-upload",  "data"),
+    Output("cache-hit-info",  "data"),
+    Output("run-trigger",     "data"),
+    Output("cache-hit-modal", "is_open"),
+    Input("upload-pdf",       "contents"),
+    State("upload-pdf",       "filename"),
+    State("selected-provider","data"),
+    prevent_initial_call=True,
+)
+def on_upload(contents_list, filenames_list, provider):
+    """
+    Fast pre-check that fires the moment files land in the upload zone.
+    Hashes each file's bytes, checks the cache, then either:
+      • opens the modal (if any file already has a cached result), or
+      • fires run-trigger immediately (no modal needed).
+    The pipeline long_callback is triggered by run-trigger, NOT by the upload
+    itself, so this callback acts as the gatekeeper.
+    """
+    if not contents_list:
+        return dash.no_update, [], dash.no_update, False
+
+    if not isinstance(contents_list, list):
+        contents_list  = [contents_list]
+        filenames_list = [filenames_list]
+
+    provider = provider or LLM_PROVIDER
+    cache    = _load_cache()
+    hits     = []
+
+    for contents, filename in zip(contents_list, filenames_list):
+        if not filename.lower().endswith(".pdf"):
+            continue
+        try:
+            _, content_string = contents.split(",", 1)
+            file_bytes = base64.b64decode(content_string)
+        except (ValueError, binascii.Error):
+            continue
+        cache_key = f"{provider}:{hashlib.sha256(file_bytes).hexdigest()}"
+        if cache_key in cache:
+            m = (cache[cache_key].get("_meta") or {})
+            hits.append({
+                "filename":  filename,
+                "cache_key": cache_key,
+                "cached_ts": m.get("timestamp", "—"),
+                "provider":  provider,
+            })
+
+    pending = {"contents": contents_list, "filenames": filenames_list, "provider": provider}
+
+    if hits:
+        return pending, hits, dash.no_update, True
+    return pending, [], {"mode": "normal", "ts": time.time()}, False
+
+
 @app.long_callback(
     output=[
         Output("pipeline-results", "data"),
         Output("pipeline-status",  "data"),
         Output("filename-display", "children", allow_duplicate=True),
+        Output("diff-store",       "data"),
     ],
-    inputs=Input("upload-pdf", "contents"),
+    inputs=Input("run-trigger", "data"),
     state=[
-        State("upload-pdf",        "filename"),
+        State("pending-upload",    "data"),
         State("pipeline-results",  "data"),
+        State("cache-hit-info",    "data"),
         State("selected-provider", "data"),
     ],
     progress=Output("stepper-row", "children", allow_duplicate=True),
-    running=[
-        # Force the dcc.Loading spinner over the results card to stay visible
-        # for the full duration of the pipeline (not just the brief moment a
-        # regular callback would normally trigger it).
-        (Output("loading-results", "display"), "show", "auto"),
-    ],
     manager=long_callback_manager,
     prevent_initial_call=True,
 )
-def run_pipeline(set_progress, contents_list, filenames_list, existing_results, selected_provider):
+def run_pipeline(set_progress, trigger, pending, existing_results, hit_info, selected_provider):
     """
-    Process every uploaded PDF and APPEND new results to the accumulated store.
+    Process uploaded PDFs and append results to the accumulated store.
 
-    Runs in a subprocess via DiskcacheManager so that `set_progress` can push
-    live stepper updates while extraction + LLM analysis are in flight.
-
-    Stepper progression pushed by this callback:
-
-        START    ──► step 1 (Upload  active)   ← pushed right here, before loop
-        per file ──► step 2 (Extract active)   ← pushed inside process_single_pdf
-                 ──► step 3 (Analyze active)   ← pushed inside process_single_pdf
-        END      ──► step 4 (all done green)   ← pushed right here, after loop
-                                                 (or error state if anything failed)
-
-    Existing results from previous uploads are preserved.
-    Only the Reset button clears them.
+    Modes (set by run-trigger):
+      "normal"    — standard flow; cache hits served from cache automatically.
+      "reprocess" — force fresh LLM call for cache-hit files; compare with
+                    the old cached result and populate diff-store.
     """
+    if not trigger or not pending:
+        return existing_results or [], {"step": 0, "error": ""}, "", []
+
+    mode           = trigger.get("mode", "normal")
+    contents_list  = pending.get("contents",  [])
+    filenames_list = pending.get("filenames", [])
+    provider_val   = pending.get("provider") or selected_provider or LLM_PROVIDER
+
     if not contents_list:
-        return existing_results or [], {"step": 0, "error": ""}, ""
+        return existing_results or [], {"step": 0, "error": ""}, "", []
 
-    # Dash may pass a single item (not a list) when only one file is selected
     if not isinstance(contents_list, list):
         contents_list  = [contents_list]
         filenames_list = [filenames_list]
 
-    # ── Live: Upload is the active step the instant we start ────────────────
-    # Without this push the stepper would stay on "idle" until the first file
-    # finishes decoding + saving, which on small PDFs happens too fast to see.
+    # Names of files that were cache hits (used only in reprocess mode)
+    hit_filenames = {h["filename"] for h in (hit_info or [])}
+
+    # Snapshot cached results BEFORE we overwrite them (reprocess only)
+    cache_snapshots: dict = {}
+    if mode == "reprocess" and hit_info:
+        snap_cache = _load_cache()
+        for h in hit_info:
+            ck = h.get("cache_key", "")
+            if ck and ck in snap_cache:
+                cache_snapshots[h["filename"]] = snap_cache[ck].copy()
+
     try:
         set_progress(_build_stepper(1))
     except (OSError, RuntimeError):
         pass
 
-    accumulated = list(existing_results or [])
-    errors      = []
-    badges      = []
+    accumulated      = list(existing_results or [])
+    errors           = []
+    badges           = []
+    diff_new_results = []  # reprocessed results held for accept/reject
+    diff_old_results = []  # corresponding cached snapshots (may be None)
+    diff_cache_keys  = []  # corresponding cache keys for write-on-accept
 
     for contents, filename in zip(contents_list, filenames_list):
-        # process_single_pdf pushes step 2 (before extract) and step 3 (before
-        # LLM) via this same set_progress callback.
+        force  = (mode == "reprocess") and (filename in hit_filenames)
         result, error = process_single_pdf(
             contents, filename,
             progress_cb=set_progress,
-            provider=selected_provider or LLM_PROVIDER,
+            provider=provider_val,
+            force_reprocess=force,
+            write_cache=not force,
         )
         if result:
-            accumulated.append(result)
-            badges.append(html.Div(["+ ", filename], className="file-badge done"))
+            if force:
+                diff_new_results.append(result)
+                diff_old_results.append(cache_snapshots.get(filename))
+                try:
+                    _, cs = contents.split(",", 1)
+                    fb    = base64.b64decode(cs)
+                    diff_cache_keys.append(f"{provider_val}:{hashlib.sha256(fb).hexdigest()}")
+                except (ValueError, binascii.Error):
+                    diff_cache_keys.append(None)
+                badges.append(html.Div(["~ ", filename, " — pending"], className="file-badge pending"))
+            else:
+                accumulated.append(result)
+                badges.append(html.Div(["+ ", filename], className="file-badge done"))
         else:
             errors.append(error)
-            badges.append(html.Div(["! ", filename], className="file-badge error",
-                                   title=error))
+            badges.append(html.Div(["! ", filename], className="file-badge error", title=error))
 
-    # ── Decide the final status ─────────────────────────────────────────────
-    if errors and not accumulated:
-        # Every file failed — leave the stepper on Analyze with a red X.
-        status      = {"step": 3, "error": " | ".join(errors)}
-        final_step  = 3
-        final_error = True
+    # Build diff objects (only include files with actual changes)
+    diffs = []
+    for new_r, old_r in zip(diff_new_results, diff_old_results):
+        if old_r is None:
+            continue
+        diff = _compute_diff(new_r.get("_source_file", ""), old_r, new_r)
+        if diff is not None:
+            diffs.append(diff)
+
+    diff_store_out = {
+        "diffs":       diffs,
+        "new_results": diff_new_results,
+        "old_results": diff_old_results,
+        "cache_keys":  diff_cache_keys,
+    } if diff_new_results else {}
+
+    all_attempted = accumulated + diff_new_results
+    if errors and not all_attempted:
+        status, final_step, final_error = {"step": 3, "error": " | ".join(errors)}, 3, True
     elif errors:
-        # Mixed batch — overall we did reach Done, but flag the issues.
-        status      = {"step": 4, "error": "Some files failed: " + " | ".join(errors)}
-        final_step  = 4
-        final_error = False
+        status, final_step, final_error = {"step": 4, "error": "Some files failed: " + " | ".join(errors)}, 4, False
     else:
-        # Everything succeeded.
-        status      = {"step": 4, "error": ""}
-        final_step  = 4
-        final_error = False
+        status, final_step, final_error = {"step": 4, "error": ""}, 4, False
 
-    # ── Live: paint the final state immediately ─────────────────────────────
-    # If consecutive batches both end with status={step:4,error:""}, the data
-    # store doesn't change, so `update_stepper` would NOT re-fire.  Pushing
-    # this last set_progress guarantees the user sees the final state
-    # regardless.
     try:
         set_progress(_build_stepper(final_step, error=final_error))
     except (OSError, RuntimeError):
         pass
 
-    return accumulated, status, html.Div(badges, className="file-queue")
+    return accumulated, status, html.Div(badges, className="file-queue"), diff_store_out
+
+
+@app.callback(
+    Output("modal-body-content", "children"),
+    Input("cache-hit-info",      "data"),
+)
+def render_modal_body(hit_info):
+    """Populate the modal with the list of files that have cached results."""
+    if not hit_info:
+        return ""
+    items = [
+        html.Div([
+            html.Span(h["filename"],  className="modal-hit-filename"),
+            html.Span(
+                f"Cached {h['cached_ts']}  ·  {h['provider']}",
+                className="modal-hit-meta",
+            ),
+        ], className="modal-hit-item")
+        for h in hit_info
+    ]
+    n     = len(hit_info)
+    label = f"{n} PDF{'s' if n != 1 else ''}"
+    return html.Div([
+        html.P(
+            f"{label} already {'have' if n != 1 else 'has'} cached results "
+            "with the selected provider:",
+            className="modal-question",
+            style={"marginBottom": "10px", "marginTop": "0"},
+        ),
+        html.Div(items),
+        html.P(
+            "Load from cache (instant, no API call) or reprocess to get fresh "
+            "results and see a side-by-side comparison of any differences?",
+            className="modal-question",
+        ),
+    ])
+
+
+@app.callback(
+    Output("pipeline-results",  "data",      allow_duplicate=True),
+    Output("cache-hit-modal",   "is_open",   allow_duplicate=True),
+    Output("filename-display",  "children",  allow_duplicate=True),
+    Output("pipeline-status",   "data",      allow_duplicate=True),
+    Input("btn-use-cache",      "n_clicks"),
+    State("cache-hit-info",     "data"),
+    State("pipeline-results",   "data"),
+    prevent_initial_call=True,
+)
+def use_cache_click(n_clicks, hit_info, existing_results):
+    """Read cache-hit files directly from disk — no subprocess needed."""
+    if not n_clicks:
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+    cache  = _load_cache()
+    loaded = []
+    badges = []
+
+    for h in (hit_info or []):
+        ck = h.get("cache_key", "")
+        fn = h.get("filename",  "")
+        if ck and ck in cache:
+            r = cache[ck].copy()
+            r["_source_file"] = fn
+            loaded.append(r)
+            badges.append(html.Div(["+ ", fn], className="file-badge done"))
+
+    accumulated = list(existing_results or []) + loaded
+    return (
+        accumulated,
+        False,
+        html.Div(badges, className="file-queue"),
+        {"step": 4, "error": ""},
+    )
+
+
+@app.callback(
+    Output("run-trigger",     "data",    allow_duplicate=True),
+    Output("cache-hit-modal", "is_open", allow_duplicate=True),
+    Input("btn-reprocess",    "n_clicks"),
+    prevent_initial_call=True,
+)
+def reprocess_click(n_clicks):
+    if not n_clicks:
+        return dash.no_update, dash.no_update
+    return {"mode": "reprocess", "ts": time.time()}, False
+
+
+@app.callback(
+    Output("diff-content",    "children"),
+    Output("diff-card",       "style"),
+    Output("diff-action-row", "style"),
+    Input("diff-store",       "data"),
+)
+def render_diff(diff_store):
+    """Show section 05 whenever reprocessed results are awaiting accept/reject."""
+    if not diff_store:
+        return "", {"display": "none"}, {"display": "none"}
+    diffs       = diff_store.get("diffs",       []) if isinstance(diff_store, dict) else []
+    has_pending = bool(diff_store.get("new_results")) if isinstance(diff_store, dict) else False
+    if not has_pending and not diffs:
+        return "", {"display": "none"}, {"display": "none"}
+    return build_diff_section(diffs), {"display": "block"}, {"display": "flex"}
+
+
+@app.callback(
+    Output("pipeline-results",  "data",      allow_duplicate=True),
+    Output("diff-store",        "data",      allow_duplicate=True),
+    Output("cache-load-status", "children",  allow_duplicate=True),
+    Output("cache-load-status", "className", allow_duplicate=True),
+    Input("btn-accept-diff",    "n_clicks"),
+    State("diff-store",         "data"),
+    State("pipeline-results",   "data"),
+    prevent_initial_call=True,
+)
+def accept_diff(n_clicks, diff_store, existing_results):
+    """Accept reprocessed results: write to cache and add to pipeline results."""
+    if not n_clicks or not diff_store:
+        return (dash.no_update,) * 4
+    new_results = diff_store.get("new_results", []) or []
+    cache_keys  = diff_store.get("cache_keys",  []) or []
+    try:
+        fresh_cache = _load_cache()
+        for r, ck in zip(new_results, cache_keys):
+            if ck:
+                fresh_cache[ck] = r.copy()
+        _save_cache(fresh_cache)
+    except (OSError, json.JSONDecodeError):
+        pass
+    accumulated = list(existing_results or []) + new_results
+    n = len(new_results)
+    return accumulated, {}, f"Accepted {n} reprocessed result{'s' if n != 1 else ''}.", "cache-status ok"
+
+
+@app.callback(
+    Output("pipeline-results",  "data",      allow_duplicate=True),
+    Output("diff-store",        "data",      allow_duplicate=True),
+    Output("cache-load-status", "children",  allow_duplicate=True),
+    Output("cache-load-status", "className", allow_duplicate=True),
+    Input("btn-reject-diff",    "n_clicks"),
+    State("diff-store",         "data"),
+    State("pipeline-results",   "data"),
+    prevent_initial_call=True,
+)
+def reject_diff(n_clicks, diff_store, existing_results):
+    """Reject reprocessed results: discard new data, fall back to cached results."""
+    if not n_clicks or not diff_store:
+        return (dash.no_update,) * 4
+    old_results = [r for r in (diff_store.get("old_results", []) or []) if r is not None]
+    accumulated = list(existing_results or []) + old_results
+    n = len(old_results)
+    return accumulated, {}, f"Rejected — kept {n} cached result{'s' if n != 1 else ''}.", "cache-status ok"
+
+
+@app.callback(
+    Output("validate-btn-row", "style"),
+    Input("pipeline-results",  "data"),
+)
+def show_validate_btn(results):
+    """Show the Validate button only when at least one sample well is in results."""
+    if results and _match_sample_wells(results):
+        return {"display": "flex"}
+    return {"display": "none"}
+
+
+@app.callback(
+    Output("validation-content", "children"),
+    Output("validation-card",    "style"),
+    Input("btn-validate",        "n_clicks"),
+    State("pipeline-results",    "data"),
+    prevent_initial_call=True,
+)
+def run_validation(n_clicks, results):
+    """Build and display the validation results table."""
+    if not n_clicks or not results:
+        return "", {"display": "none"}
+    return _build_validation_content(results), {"display": "block"}
+
+
+@app.callback(
+    Output("validation-card", "style", allow_duplicate=True),
+    Input("btn-close-validation", "n_clicks"),
+    prevent_initial_call=True,
+)
+def close_validation(n_clicks):
+    if not n_clicks:
+        return dash.no_update
+    return {"display": "none"}
 
 
 @app.callback(
@@ -482,24 +915,25 @@ def download_metadata_csv(n_clicks, results):
 
 
 @app.callback(
-    Output("upload-pdf",       "contents"),
-    Output("pipeline-results", "data",     allow_duplicate=True),
-    Output("pipeline-status",  "data",     allow_duplicate=True),
-    Output("filename-display", "children", allow_duplicate=True),
-    Output("error-banner",     "style",    allow_duplicate=True),
-    Output("btn-toggle-meta",  "n_clicks"),
-    Input("btn-reset",         "n_clicks"),
+    Output("upload-pdf",         "contents"),
+    Output("pipeline-results",   "data",     allow_duplicate=True),
+    Output("pipeline-status",    "data",     allow_duplicate=True),
+    Output("filename-display",   "children", allow_duplicate=True),
+    Output("error-banner",       "style",    allow_duplicate=True),
+    Output("btn-toggle-meta",    "n_clicks"),
+    Output("diff-store",         "data",     allow_duplicate=True),
+    Output("pending-upload",     "data",     allow_duplicate=True),
+    Output("cache-hit-info",     "data",     allow_duplicate=True),
+    Output("validation-card",    "style",    allow_duplicate=True),
+    Output("validation-content", "children", allow_duplicate=True),
+    Input("btn-reset",           "n_clicks"),
     prevent_initial_call=True,
 )
 def reset_app(n_clicks):
-    """
-    Clear ALL results and reset to the initial state.
-    Also resets the metadata toggle so it starts collapsed for the next batch.
-    Only triggered by user clicking 'Reset & Clear'.
-    """
+    """Clear ALL results and reset to the initial state."""
     if not n_clicks:
-        return (dash.no_update,) * 6
-    return None, [], {"step": 0, "error": ""}, "", {"display": "none"}, 0
+        return (dash.no_update,) * 11
+    return None, [], {"step": 0, "error": ""}, "", {"display": "none"}, 0, {}, None, [], {"display": "none"}, ""
 
 
 @app.callback(

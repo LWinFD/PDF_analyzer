@@ -210,6 +210,30 @@ You can upload multiple files at once or in separate batches — results accumul
 
 ---
 
+## Validating your setup
+
+After processing one or both of the sample PDFs from the `Well_Reports/` folder, a **Validate Sample Results** button appears below the results table. Click it to compare what the app extracted against a set of manually verified reference values stored in `Validation.csv`.
+
+**What it checks**
+
+For each sample well that has been processed, the validation table shows every parameter side-by-side — expected value on the left, extracted value on the right — with a green **PASS** or red **FAIL** badge. A summary line at the bottom counts how many of the 15 parameters matched.
+
+**What a passing result looks like**
+
+```
+15/15 parameters matched for well 6608/11-3.  All correct!
+15/15 parameters matched for well 6608/10-13. All correct!
+```
+
+**Scope**
+
+- The validate button only appears after processing the two included sample PDFs — it will not appear for your own documents.
+- If only one sample PDF has been processed, only that well's results are shown; the second is skipped with no error.
+- Validation compares against `Validation.csv` in the project root. The expected values in that file are correct answers manually read from the original reports. Do not edit them unless you have re-verified the source document.
+- A **Close Validation** button at the top of the validation card hides it without losing your results. The validation card also disappears when **Reset & Clear** is pressed.
+
+---
+
 ## Running the tests
 
 The test suite uses mocks, so it runs with no API key, no PDF, and no running server needed.
@@ -326,10 +350,10 @@ These power the live progress stepper. Run `pip install diskcache multiprocess`.
 The background task manager couldn't start a subprocess. Make sure `diskcache` and `multiprocess` are installed and the `.cache/` folder is writable. On some Windows machines antivirus software blocks subprocess creation — try temporarily whitelisting your project folder.
 
 **`TesseractNotFoundError`**
-Tesseract is not on your PATH. Either install it and add it to PATH (see the OCR section above), or hard-code the path in `app.py` as described there. This error only happens on scanned PDFs — the sample PDFs will work fine without Tesseract.
+Tesseract is not on your PATH. Either install it and add it to PATH (see the OCR section above), or set `TESSERACT_EXE` in your `.env` file to the full path of `tesseract.exe` (see the Windows note in the OCR section). This error only happens on scanned PDFs — the sample PDFs will work fine without Tesseract.
 
 **`Unable to get page count. Is poppler installed and in PATH?`**
-Same situation as above but for Poppler. Only affects scanned PDFs.
+Same situation as above but for Poppler. Set `POPPLER_BIN` in your `.env` file to the full path of the Poppler `Library\bin` folder. Only affects scanned PDFs.
 
 **LLM returns garbled or incomplete JSON**
 This can happen with very long PDFs. Increase `max_tokens` in the `analyze_with_llm()` function inside `llm_clients.py` (currently `1024`).
@@ -354,3 +378,12 @@ The app caches results in `well_cache.json` so the same PDF is never sent to the
 4. **Done** — Results appear as a new row in the table. The pipeline stepper turns fully green. You can upload more PDFs to add more rows, or click **Download Results** to save a CSV.
 
 Throughout steps 2–4 the stepper indicator updates live so you can see exactly which stage each file is at. Previously processed results are never removed — they accumulate until you click **Reset & Clear**.
+
+**Result cache and cache-hit dialog**
+
+Every result is stored in `well_cache.json` (keyed by the PDF's content hash). If you upload a PDF that has been processed before, a dialog appears immediately with two choices:
+
+- **Load from Cache** — reuses the stored result instantly; no AI call, no wait.
+- **Reprocess & Compare** — runs the full pipeline again and shows a side-by-side diff of the old and new values so you can see exactly what (if anything) changed.
+
+This means the same PDF is never sent to the AI twice unless you explicitly ask for it.

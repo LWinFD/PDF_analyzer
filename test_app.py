@@ -872,28 +872,34 @@ class TestRunPipeline(unittest.TestCase):
     def _make_contents(self, data: bytes = b"%PDF-fake") -> str:
         return "data:application/pdf;base64," + base64.b64encode(data).decode()
 
+    def _make_pending(self, contents_list, filenames_list, provider="gemini"):
+        """Build the pending-upload dict as on_upload() would produce it."""
+        return {"contents": contents_list, "filenames": filenames_list, "provider": provider}
+
+    @staticmethod
+    def _trigger(mode="normal"):
+        return {"mode": mode, "ts": 0}
+
     def test_none_contents_returns_existing_results_unchanged(self):
         existing = [_sample_result()]
-        result, status, _ = A.run_pipeline(self._noop, None, None, existing, "gemini")
+        result, status, _, _ = A.run_pipeline(self._noop, None, None, existing, [], "gemini")
         self.assertEqual(result, existing)
 
     def test_non_pdf_file_produces_error_status(self):
-        _, status, _ = A.run_pipeline(
-            self._noop,
-            [self._make_contents()], ["doc.docx"],
-            [], "gemini",
+        pending = self._make_pending([self._make_contents()], ["doc.docx"])
+        _, status, _, _ = A.run_pipeline(
+            self._noop, self._trigger(), pending, [], [], "gemini",
         )
         self.assertNotEqual(status["error"], "")
 
     @patch("callbacks.process_single_pdf")
     def test_results_accumulate_across_calls(self, mock_process):
         """New results are appended to existing ones — never replacing them."""
-        existing          = [_sample_result("old.pdf", "OldWell")]
+        existing = [_sample_result("old.pdf", "OldWell")]
         mock_process.return_value = (_sample_result("new.pdf", "NewWell"), "")
-        result, status, _ = A.run_pipeline(
-            self._noop,
-            [self._make_contents()], ["new.pdf"],
-            existing, "gemini",
+        pending = self._make_pending([self._make_contents()], ["new.pdf"])
+        result, status, _, _ = A.run_pipeline(
+            self._noop, self._trigger(), pending, existing, [], "gemini",
         )
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]["_source_file"], "old.pdf")
@@ -906,11 +912,9 @@ class TestRunPipeline(unittest.TestCase):
             (_sample_result("b.pdf", "Well-B"), ""),
             (_sample_result("c.pdf", "Well-C"), ""),
         ]
-        result, status, _ = A.run_pipeline(
-            self._noop,
-            [self._make_contents()] * 3,
-            ["a.pdf", "b.pdf", "c.pdf"],
-            [], "gemini",
+        pending = self._make_pending([self._make_contents()] * 3, ["a.pdf", "b.pdf", "c.pdf"])
+        result, status, _, _ = A.run_pipeline(
+            self._noop, self._trigger(), pending, [], [], "gemini",
         )
         self.assertEqual(len(result), 3)
         self.assertEqual(status["error"], "")
@@ -922,11 +926,9 @@ class TestRunPipeline(unittest.TestCase):
             (_sample_result("good.pdf"), ""),
             (None, "LLM failed"),
         ]
-        result, status, _ = A.run_pipeline(
-            self._noop,
-            [self._make_contents()] * 2,
-            ["good.pdf", "bad.pdf"],
-            [], "gemini",
+        pending = self._make_pending([self._make_contents()] * 2, ["good.pdf", "bad.pdf"])
+        result, status, _, _ = A.run_pipeline(
+            self._noop, self._trigger(), pending, [], [], "gemini",
         )
         self.assertEqual(len(result), 1)
         self.assertIn("failed", status["error"].lower())
@@ -934,10 +936,9 @@ class TestRunPipeline(unittest.TestCase):
     @patch("callbacks.process_single_pdf")
     def test_wellbore_name_preserved_through_pipeline(self, mock_process):
         mock_process.return_value = (_sample_result("w.pdf", "Gullfaks C-04"), "")
-        result, _, _ = A.run_pipeline(
-            self._noop,
-            [self._make_contents()], ["w.pdf"],
-            [], "gemini",
+        pending = self._make_pending([self._make_contents()], ["w.pdf"])
+        result, _, _, _ = A.run_pipeline(
+            self._noop, self._trigger(), pending, [], [], "gemini",
         )
         self.assertEqual(result[0]["wellbore_name"], "Gullfaks C-04")
 
@@ -945,11 +946,12 @@ class TestRunPipeline(unittest.TestCase):
     def test_single_file_not_in_list_normalised(self, mock_process):
         """When Dash passes a bare string+filename (not a list), it must be handled."""
         mock_process.return_value = (_sample_result("solo.pdf"), "")
-        result, _, _ = A.run_pipeline(
-            self._noop,
+        pending = self._make_pending(
             self._make_contents(),   # bare string — not wrapped in a list
             "solo.pdf",
-            [], "gemini",
+        )
+        result, _, _, _ = A.run_pipeline(
+            self._noop, self._trigger(), pending, [], [], "gemini",
         )
         self.assertEqual(len(result), 1)
 
@@ -957,10 +959,9 @@ class TestRunPipeline(unittest.TestCase):
     def test_selected_provider_passed_to_process_single_pdf(self, mock_process):
         """The provider chosen in the UI dropdown must reach process_single_pdf."""
         mock_process.return_value = (_sample_result("x.pdf"), "")
+        pending = self._make_pending([self._make_contents()], ["x.pdf"], provider="anthropic")
         A.run_pipeline(
-            self._noop,
-            [self._make_contents()], ["x.pdf"],
-            [], "anthropic",
+            self._noop, self._trigger(), pending, [], [], "anthropic",
         )
         self.assertEqual(mock_process.call_args.kwargs.get("provider"), "anthropic")
 
@@ -968,10 +969,9 @@ class TestRunPipeline(unittest.TestCase):
     def test_all_files_fail_gives_non_done_step(self, mock_process):
         """If every file fails, the status step must not be 4 (the Done state)."""
         mock_process.return_value = (None, "total failure")
-        _, status, _ = A.run_pipeline(
-            self._noop,
-            [self._make_contents()], ["bad.pdf"],
-            [], "gemini",
+        pending = self._make_pending([self._make_contents()], ["bad.pdf"])
+        _, status, _, _ = A.run_pipeline(
+            self._noop, self._trigger(), pending, [], [], "gemini",
         )
         self.assertNotEqual(status["step"], 4)
         self.assertNotEqual(status["error"], "")

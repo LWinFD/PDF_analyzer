@@ -55,14 +55,27 @@ def extract_text_from_pdf(pdf_path: str) -> tuple:
         raise RuntimeError("pdfplumber is required.  pip install pdfplumber") from e
 
     try:
+        import shutil
         import pdf2image
         import pytesseract
-        ocr_available = True
+        # Verify the underlying binaries are actually reachable at runtime.
+        # The Python packages import fine even when the executables are missing,
+        # which would cause a hard crash later — check now so we can fall back cleanly.
+        _poppler_ok   = bool(shutil.which("pdftoppm") or shutil.which("pdftoppm.exe"))
+        _tess_cmd     = pytesseract.pytesseract.tesseract_cmd  # may be custom path set above
+        _tesseract_ok = (
+            os.path.isfile(_tess_cmd)
+            if _tess_cmd and _tess_cmd != "tesseract"
+            else bool(shutil.which("tesseract") or shutil.which("tesseract.exe"))
+        )
+        ocr_available = _poppler_ok and _tesseract_ok
     except ImportError:
         ocr_available = False
 
-    all_text  = []
-    ocr_used  = False
+    all_text          = []
+    ocr_used          = False
+    ocr_pages_done    = 0   # pages successfully processed by OCR
+    ocr_pages_skipped = 0   # pages that needed OCR but binaries were unavailable
 
     with pdfplumber.open(pdf_path) as pdf:
         page_count = len(pdf.pages)
@@ -96,13 +109,14 @@ def extract_text_from_pdf(pdf_path: str) -> tuple:
 
             else:
                 # CASE B: scanned — OCR fallback
-                ocr_used = True
                 if not ocr_available:
+                    ocr_pages_skipped += 1
                     page_parts.append(
                         f"[Page {page_num}: scanned - OCR unavailable "
-                        "(install pdf2image + pytesseract)]"
+                        "(Tesseract/Poppler not found in PATH)]"
                     )
                 else:
+                    ocr_used = True
                     try:
                         images = pdf2image.convert_from_path(
                             pdf_path, dpi=300,
@@ -114,10 +128,16 @@ def extract_text_from_pdf(pdf_path: str) -> tuple:
                             )
                             if ocr_text.strip():
                                 page_parts.append(ocr_text)
-                    except (OSError, RuntimeError) as e:
+                        ocr_pages_done += 1
+                    except Exception as e:
                         page_parts.append(f"[OCR ERROR page {page_num}: {e}]")
 
             header = f"\n{'='*60}\nPAGE {page_num}\n{'='*60}\n"
             all_text.append(header + "\n".join(page_parts))
 
-    return "\n".join(all_text), {"page_count": page_count, "ocr_used": ocr_used}
+    return "\n".join(all_text), {
+        "page_count":        page_count,
+        "ocr_used":          ocr_used,
+        "ocr_pages_done":    ocr_pages_done,
+        "ocr_pages_skipped": ocr_pages_skipped,
+    }

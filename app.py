@@ -43,7 +43,7 @@ except (ImportError, AttributeError, TypeError):
     pass
 
 # ── Re-export everything so `import app as A` keeps working in test_app.py ───
-from cache import CACHE_FILE, _load_cache, _save_cache                   # noqa: E402
+from cache import CACHE_FILE, VALIDATION_FILE, _load_cache, _save_cache    # noqa: E402
 from pdf_extract import OCR_THRESHOLD, _format_table, extract_text_from_pdf  # noqa: E402
 from llm_clients import (                                                  # noqa: E402
     LLM_PROVIDER, PARAM_LABELS, ANALYSIS_PROMPT, _parse_llm_json, analyze_with_llm,
@@ -59,6 +59,9 @@ from callbacks import (                                                    # noq
     show_queued_files, run_pipeline, update_stepper, update_results,
     download_csv, update_meta, toggle_meta, download_metadata_csv,
     reset_app, load_from_cache, sync_provider_store,
+    accept_diff, reject_diff,
+    show_validate_btn, run_validation, close_validation,
+    _match_sample_wells, _build_validation_content,
 )
 
 # ── Ensure temp folder exists ─────────────────────────────────────────────────

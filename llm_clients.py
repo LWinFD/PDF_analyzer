@@ -57,8 +57,11 @@ below MUST be returned as "Not stated".
 PARAMETERS TO EXTRACT:
 
 1. Wellbore Name
-   - Return the wellbore or well name/designation as it appears in the document
-   - Look for labels such as: Well Name, Wellbore, Well Designation, Field/Well, or the report header
+   - Return ONLY the NPD-style wellbore designation — the numeric/alphanumeric code in the
+     format BLOCK/WELL, e.g. "6608/10-13", "34/10-A-21 B", "25/11-27 S".
+   - Look for labels such as: Well Name, Wellbore, Well Designation, Field/Well, or the report header.
+   - Do NOT include the field name, discovery name, or any descriptive word that follows
+     the designation. For example, if the document says "6608/10-13 Fløien", return "6608/10-13".
    - If not found, return: "Not stated"
 
 2. Shallow Gas Hazard Classification
@@ -280,7 +283,7 @@ def analyze_with_llm(raw_text: str, provider: str = None) -> tuple:
         client = anthropic.Anthropic(api_key=api_key)
         try:
             message = client.messages.create(
-                model="claude-opus-4-7", max_tokens=1024,
+                model="claude-opus-4-8", max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}],
             )
         except anthropic.APIError as e:

@@ -7,7 +7,9 @@ PDF's raw bytes.  Written atomically so a crash mid-save never corrupts the file
 import os
 import json
 
-CACHE_FILE = "./well_cache.json"
+_HERE           = os.path.dirname(os.path.abspath(__file__))
+CACHE_FILE      = os.path.join(_HERE, "well_cache.json")
+VALIDATION_FILE = os.path.join(_HERE, "Validation.csv")
 
 
 def _load_cache() -> dict:
