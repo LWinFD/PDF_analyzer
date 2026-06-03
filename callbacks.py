@@ -926,20 +926,24 @@ def download_metadata_csv(n_clicks, results):
     Output("cache-hit-info",     "data",     allow_duplicate=True),
     Output("validation-card",    "style",    allow_duplicate=True),
     Output("validation-content", "children", allow_duplicate=True),
+    Output("cache-load-status",  "children", allow_duplicate=True),
+    Output("cache-load-status",  "className",allow_duplicate=True),
     Input("btn-reset",           "n_clicks"),
     prevent_initial_call=True,
 )
 def reset_app(n_clicks):
     """Clear ALL results and reset to the initial state."""
     if not n_clicks:
-        return (dash.no_update,) * 11
-    return None, [], {"step": 0, "error": ""}, "", {"display": "none"}, 0, {}, None, [], {"display": "none"}, ""
+        return (dash.no_update,) * 13
+    return None, [], {"step": 0, "error": ""}, "", {"display": "none"}, 0, {}, None, [], {"display": "none"}, "", "", "cache-status"
 
 
 @app.callback(
     Output("pipeline-results",  "data",      allow_duplicate=True),
-    Output("cache-load-status", "children"),
-    Output("cache-load-status", "className"),
+    Output("cache-load-status", "children",  allow_duplicate=True),
+    Output("cache-load-status", "className", allow_duplicate=True),
+    Output("cache-msg-timer",   "disabled",  allow_duplicate=True),
+    Output("cache-msg-timer",   "n_intervals"),
     Input("btn-load-cache",     "n_clicks"),
     State("pipeline-results",   "data"),
     prevent_initial_call=True,
@@ -949,22 +953,16 @@ def load_from_cache(n_clicks, existing_results):
     Read well_cache.json from disk and merge its valid entries into the
     pipeline-results store — no re-upload required.
 
-    Reading a local JSON file is instantaneous, so this uses a regular
-    @app.callback rather than a long_callback.
+    Deduplication: entries whose _source_file is already in the results
+    table are skipped so repeated clicks never add duplicate rows.
 
-    Validation: every cache entry must contain all keys defined in PARAM_LABELS.
-    Entries that fail this check are skipped and their count reported in the
-    status message.
-
-    Merging: valid entries are appended to whatever results are already
-    displayed, matching the same accumulation behaviour as uploading new PDFs.
-
-    Status messages:
-        ok      — "Loaded N results from cache."  (green)
-        warning — empty / missing file / no valid entries  (amber-dim)
+    Auto-dismiss: on success the status message is cleared after 2.5 s
+    by enabling cache-msg-timer (a dcc.Interval), which fires once and
+    is disabled again by the auto_clear_cache_msg callback.
     """
+    _no_timer = (dash.no_update, "", "cache-status", True, dash.no_update)
     if not n_clicks:
-        return dash.no_update, "", "cache-status"
+        return _no_timer
 
     cache = _load_cache()
 
@@ -973,9 +971,11 @@ def load_from_cache(n_clicks, existing_results):
             dash.no_update,
             f"Cache file not found or empty ({CACHE_FILE}).",
             "cache-status warning",
+            True, dash.no_update,
         )
 
-    expected_keys = set(PARAM_LABELS.keys())
+    expected_keys    = set(PARAM_LABELS.keys())
+    existing_sources = {r.get("_source_file") for r in (existing_results or [])}
     valid_entries: list = []
     skipped = 0
 
@@ -983,7 +983,6 @@ def load_from_cache(n_clicks, existing_results):
         if not isinstance(entry, dict):
             skipped += 1
             continue
-        # Entry must have every expected parameter key.
         if not expected_keys.issubset(entry.keys()):
             skipped += 1
             continue
@@ -995,16 +994,39 @@ def load_from_cache(n_clicks, existing_results):
             dash.no_update,
             f"No valid entries found in cache{detail}.",
             "cache-status warning",
+            True, dash.no_update,
         )
 
-    accumulated = list(existing_results or []) + valid_entries
+    new_entries = [e for e in valid_entries if e.get("_source_file") not in existing_sources]
 
-    n   = len(valid_entries)
+    if not new_entries:
+        return (
+            dash.no_update,
+            "Already loaded — no new entries.",
+            "cache-status warning",
+            False, 0,
+        )
+
+    accumulated = list(existing_results or []) + new_entries
+
+    n   = len(new_entries)
     msg = f"Loaded {n} result{'s' if n != 1 else ''} from cache."
     if skipped:
         msg += f" ({skipped} skipped — missing keys)"
 
-    return accumulated, msg, "cache-status ok"
+    return accumulated, msg, "cache-status ok", False, 0
+
+
+@app.callback(
+    Output("cache-load-status", "children",  allow_duplicate=True),
+    Output("cache-load-status", "className", allow_duplicate=True),
+    Output("cache-msg-timer",   "disabled",  allow_duplicate=True),
+    Input("cache-msg-timer",    "n_intervals"),
+    prevent_initial_call=True,
+)
+def auto_clear_cache_msg(_n):
+    """Clear the 'Loaded N results' status text after the 2.5 s timer fires."""
+    return "", "cache-status", True
 
 
 @app.callback(

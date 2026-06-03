@@ -900,6 +900,7 @@ app.layout = html.Div([
         dcc.Store(id="pending-upload",    data=None),
         dcc.Store(id="cache-hit-info",    data=[]),
         dcc.Store(id="diff-store",        data={}),
+        dcc.Interval(id="cache-msg-timer", interval=2500, n_intervals=0, disabled=True),
         dcc.Download(id="download-csv"),
         dcc.Download(id="download-metadata-csv"),
 

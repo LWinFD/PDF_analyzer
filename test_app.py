@@ -989,12 +989,12 @@ class TestRunPipeline(unittest.TestCase):
 class TestLoadFromCache(unittest.TestCase):
 
     def test_zero_clicks_returns_no_update(self):
-        result, msg, cls = A.load_from_cache(0, [])
+        result, msg, cls, *_ = A.load_from_cache(0, [])
         self.assertIs(result, dash.no_update)
 
     @patch("callbacks._load_cache", return_value={})
     def test_empty_cache_returns_warning_class(self, _):
-        result, msg, cls = A.load_from_cache(1, [])
+        result, msg, cls, *_ = A.load_from_cache(1, [])
         self.assertIs(result, dash.no_update)
         self.assertIn("warning", cls)
 
@@ -1005,7 +1005,7 @@ class TestLoadFromCache(unittest.TestCase):
         valid["_meta"]        = {}
         mock_load.return_value = {"some_hash": valid}
         existing = [_sample_result("existing.pdf")]
-        result, msg, cls = A.load_from_cache(1, existing)
+        result, msg, cls, *_ = A.load_from_cache(1, existing)
         self.assertEqual(len(result), 2)
         self.assertIn("ok", cls)
 
@@ -1015,7 +1015,7 @@ class TestLoadFromCache(unittest.TestCase):
         mock_load.return_value = {
             "bad": {"wellbore_name": "only one key, not all 15"},
         }
-        result, msg, cls = A.load_from_cache(1, [])
+        result, msg, cls, *_ = A.load_from_cache(1, [])
         self.assertIs(result, dash.no_update)
         self.assertIn("warning", cls)
 
@@ -1029,12 +1029,24 @@ class TestLoadFromCache(unittest.TestCase):
             "valid":   valid,
             "invalid": {"only": "one key"},
         }
-        _, msg, _ = A.load_from_cache(1, [])
+        _, msg, *_ = A.load_from_cache(1, [])
         # One entry was loaded, one was skipped — either count should appear
         self.assertTrue(
             "1" in msg,
             msg="Expected skip/load count to appear in the status message",
         )
+
+    @patch("callbacks._load_cache")
+    def test_duplicate_entries_not_added_twice(self, mock_load):
+        """Re-clicking Load from Cache must not add rows already in the results."""
+        valid = _full_params("CachedWell")
+        valid["_source_file"] = "cached.pdf"
+        valid["_meta"]        = {}
+        mock_load.return_value = {"some_hash": valid}
+        existing = [valid.copy()]
+        result, msg, cls, *_ = A.load_from_cache(1, existing)
+        self.assertIs(result, dash.no_update)
+        self.assertIn("warning", cls)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
