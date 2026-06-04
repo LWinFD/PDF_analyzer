@@ -7,8 +7,8 @@ PDF's raw bytes.  Written atomically so a crash mid-save never corrupts the file
 import os
 import json
 
-_HERE           = os.path.dirname(os.path.abspath(__file__))
-CACHE_FILE      = os.path.join(_HERE, "well_cache.json")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+CACHE_FILE = os.path.join(_HERE, "well_cache.json")
 VALIDATION_FILE = os.path.join(_HERE, "Validation.csv")
 
 
@@ -22,8 +22,8 @@ def _load_cache() -> dict:
 
 
 def _save_cache(cache: dict):
-    """
-    Persist the cache dict to well_cache.json using an atomic write.
+    """Persist the cache dict to well_cache.json using an atomic write.
+
     Writing to a temp file first and then replacing means a mid-write crash
     can never leave the cache in a corrupt state.
     """

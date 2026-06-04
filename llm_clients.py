@@ -229,13 +229,13 @@ def _parse_llm_json(response_text: str) -> dict:
     text = response_text.strip()
     if text.startswith("```"):
         lines = text.splitlines()
-        text  = "\n".join(ln for ln in lines if not ln.strip().startswith("```"))
+        text = "\n".join(ln for ln in lines if not ln.strip().startswith("```"))
     return json.loads(text.strip())
 
 
 def analyze_with_llm(raw_text: str, provider: str = None) -> tuple:
-    """
-    Send raw_text to the configured LLM and return (result, meta).
+    """Send raw_text to the configured LLM and return (result, meta).
+
     result is the extracted parameter dict; meta has input_tokens, output_tokens,
     and model_name.  `provider` defaults to LLM_PROVIDER but can be overridden
     at call time so the UI dropdown takes effect without restarting the app.

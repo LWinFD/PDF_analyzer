@@ -19,9 +19,9 @@ from llm_clients import PARAM_LABELS, LLM_PROVIDER
 # ─────────────────────────────────────────────────────────────────────────────
 # SHARED CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
-_HERE              = os.path.dirname(os.path.abspath(__file__))
+_HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_UPLOAD_SIZE_MB = 50
-TEMP_FOLDER        = os.path.join(_HERE, "temp")
+TEMP_FOLDER = os.path.join(_HERE, "temp")
 
 # ── Long-callback (background) manager ────────────────────────────────────────
 # Backs the `run_pipeline` long_callback so it can run in a subprocess and push
@@ -545,18 +545,16 @@ def _value_td(val: str) -> html.Td:
 
 
 def build_results_table(results: list) -> html.Div:
-    """
-    Wide results table: one row per PDF, one column per parameter.
-    """
-    param_keys   = list(PARAM_LABELS.keys())
+    """Wide results table: one row per PDF, one column per parameter."""
+    param_keys = list(PARAM_LABELS.keys())
     header_cells = [html.Th("Source File")] + [
         html.Th(PARAM_LABELS[k]) for k in param_keys
     ]
     rows = []
     for r in results:
-        src      = r.get("_source_file", "")
-        m        = r.get("_meta", {})
-        skipped  = m.get("ocr_pages_skipped", 0) or 0
+        src = r.get("_source_file", "")
+        m = r.get("_meta", {})
+        skipped = m.get("ocr_pages_skipped", 0) or 0
         src_cell = html.Td(
             [
                 html.Span(src, title=src),
@@ -585,10 +583,10 @@ def build_results_table(results: list) -> html.Div:
 
 def build_totals_bar(results: list) -> html.Div:
     """Render the running-totals chips above the metadata table."""
-    total_input    = sum(r.get("_meta", {}).get("input_tokens",      0) or 0 for r in results)
-    total_output   = sum(r.get("_meta", {}).get("output_tokens",     0) or 0 for r in results)
-    total_extract  = sum(r.get("_meta", {}).get("extraction_time_s", 0) or 0 for r in results)
-    total_llm      = sum(r.get("_meta", {}).get("llm_time_s",        0) or 0 for r in results)
+    total_input = sum(r.get("_meta", {}).get("input_tokens",      0) or 0 for r in results)
+    total_output = sum(r.get("_meta", {}).get("output_tokens",     0) or 0 for r in results)
+    total_extract = sum(r.get("_meta", {}).get("extraction_time_s", 0) or 0 for r in results)
+    total_llm = sum(r.get("_meta", {}).get("llm_time_s",        0) or 0 for r in results)
 
     chips = [
         ("PDFs Processed",  str(len(results))),
@@ -615,12 +613,12 @@ def build_metadata_table(results: list) -> html.Div:
     ]]
     rows = []
     for r in results:
-        m        = r.get("_meta", {})
-        src      = r.get("_source_file", "")
-        inp      = m.get("input_tokens",  0)
-        out      = m.get("output_tokens", 0)
-        skipped  = m.get("ocr_pages_skipped", 0) or 0
-        done     = m.get("ocr_pages_done",    0) or 0
+        m = r.get("_meta", {})
+        src = r.get("_source_file", "")
+        inp = m.get("input_tokens",  0)
+        out = m.get("output_tokens", 0)
+        skipped = m.get("ocr_pages_skipped", 0) or 0
+        done = m.get("ocr_pages_done",    0) or 0
         cells = [
             html.Td(src, title=src),
             html.Td(m.get("timestamp", "—")),
@@ -670,7 +668,7 @@ def build_diff_section(diffs: list) -> list:
         if i > 0:
             sections.append(html.Div(className="diff-separator"))
 
-        n_changed   = len(d.get("changed",   []))
+        n_changed = len(d.get("changed",   []))
         n_unchanged = len(d.get("unchanged", []))
 
         hdr = [html.Span(d["filename"], style={"color": "var(--blue)"})]
@@ -689,7 +687,7 @@ def build_diff_section(diffs: list) -> list:
             rows.append(html.Tr([
                 html.Td(c["label"]),
                 html.Td(c["cached_val"] or "Not stated", className="diff-val-old"),
-                html.Td(c["new_val"]    or "Not stated", className="diff-val-new"),
+                html.Td(c["new_val"] or "Not stated", className="diff-val-new"),
             ], className="diff-row-changed"))
         for u in d.get("unchanged", []):
             rows.append(html.Tr([

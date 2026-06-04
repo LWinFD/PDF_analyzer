@@ -61,8 +61,8 @@ def extract_text_from_pdf(pdf_path: str) -> tuple:
         # Verify the underlying binaries are actually reachable at runtime.
         # The Python packages import fine even when the executables are missing,
         # which would cause a hard crash later — check now so we can fall back cleanly.
-        _poppler_ok   = bool(shutil.which("pdftoppm") or shutil.which("pdftoppm.exe"))
-        _tess_cmd     = pytesseract.pytesseract.tesseract_cmd  # may be custom path set above
+        _poppler_ok = bool(shutil.which("pdftoppm") or shutil.which("pdftoppm.exe"))
+        _tess_cmd = pytesseract.pytesseract.tesseract_cmd  # may be custom path set above
         _tesseract_ok = (
             os.path.isfile(_tess_cmd)
             if _tess_cmd and _tess_cmd != "tesseract"
@@ -72,9 +72,9 @@ def extract_text_from_pdf(pdf_path: str) -> tuple:
     except ImportError:
         ocr_available = False
 
-    all_text          = []
-    ocr_used          = False
-    ocr_pages_done    = 0   # pages successfully processed by OCR
+    all_text = []
+    ocr_used = False
+    ocr_pages_done = 0   # pages successfully processed by OCR
     ocr_pages_skipped = 0   # pages that needed OCR but binaries were unavailable
 
     with pdfplumber.open(pdf_path) as pdf:
