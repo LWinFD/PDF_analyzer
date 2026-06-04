@@ -69,6 +69,8 @@ well-report-analyzer/
 ├── test_app.py          ← unit tests
 ├── requirements.txt     ← Python dependencies
 ├── .env.example         ← API key template (copy this to .env)
+├── known_cements.txt    ← recognised cement names (auto-extended by the app)
+├── Validation.csv       ← verified reference values for the sample wells
 ├── Well_Reports/        ← sample well reports to test with
 ├── .gitignore
 └── README.md
@@ -234,6 +236,23 @@ For each sample well that has been processed, the validation table shows every p
 
 ---
 
+## Teaching the analyzer new cement names
+
+The recognised cement type names live in `known_cements.txt` (one name per line; `#` comments and blank lines are ignored). This file is the **single source of truth** — its contents are injected into the AI prompt at analysis time, so the model is always told exactly which cement names are already known. There is no hardcoded cement list anywhere else.
+
+When the model encounters a cement name in a document that is **not** in that list, it returns the name exactly as written and flags it. A **New Cement Names Discovered** card then appears below the results table, with one row per new name:
+
+```
+New cement name found: 'Special Blend X'. Add to the known list?   [ Confirm ]  [ Dismiss ]
+```
+
+- **Confirm** — appends that name to `known_cements.txt` (only if not already present) and hides the row. From then on the analyzer treats it as a known cement and will not flag it again.
+- **Dismiss** — hides that row without writing anything.
+
+Each row is independent: confirming or dismissing one name has no effect on the others still awaiting a decision. The card only appears when there is at least one genuinely new name — names already in `known_cements.txt` are never flagged.
+
+---
+
 ## Running the tests
 
 The test suite uses mocks, so it runs with no API key, no PDF, and no running server needed.
@@ -244,7 +263,7 @@ pytest test_app.py -v
 
 Expected output:
 ```
-======================== 121 passed in Xs ========================
+======================== 126 passed in Xs ========================
 ```
 
 A GitHub Actions workflow (`.github/workflows/ci.yml`) runs this suite automatically on every push and pull request, so a broken import or failing test is caught before it reaches the repository.
@@ -324,10 +343,12 @@ Make sure the matching key is in your `.env`:
 | `llm_clients.py` | LLM provider calls for OpenAI, Anthropic, and Gemini (`analyze_with_llm`) |
 | `layout.py` | Dash app object, UI layout, component builders, and pipeline constants |
 | `callbacks.py` | Pipeline orchestration (`process_single_pdf`) and all Dash callbacks |
-| `test_app.py` | 121 unit tests covering every function; all mocked, no real API calls |
+| `test_app.py` | 126 unit tests covering every function; all mocked, no real API calls |
 | `requirements.txt` | All pip dependencies, pinned to working versions |
 | `.env.example` | Template showing which keys are needed — copy to `.env` and fill in |
 | `.env` | Your real API keys — created by you locally, never committed to Git |
+| `known_cements.txt` | The list of recognised cement type names injected into the prompt; auto-extended when you confirm a newly discovered name (`#` and blank lines are ignored) |
+| `Validation.csv` | Manually verified reference values for the sample wells, used by the Validate button |
 | `Well_Reports/` | Sample well reports included so you can test without your own files |
 | `temp/` | Auto-created — uploaded PDFs are saved here temporarily during processing and deleted afterwards |
 | `.cache/` | Auto-created — used by Dash's background task manager to stream live progress updates |
@@ -387,3 +408,7 @@ Every result is stored in `well_cache.json` (keyed by the PDF's content hash). I
 - **Reprocess & Compare** — runs the full pipeline again and shows a side-by-side diff of the old and new values so you can see exactly what (if anything) changed.
 
 This means the same PDF is never sent to the AI twice unless you explicitly ask for it.
+
+**Learning new cement names**
+
+The cement names the model is told about all come from `known_cements.txt`, and the app can learn new ones you confirm. See [Teaching the analyzer new cement names](#teaching-the-analyzer-new-cement-names) above.

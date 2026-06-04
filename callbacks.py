@@ -9,11 +9,14 @@ import hashlib
 from datetime import datetime
 
 import dash
-from dash import html, Input, Output, State
+from dash import html, Input, Output, State, MATCH
 
 from cache import CACHE_FILE, VALIDATION_FILE, _load_cache, _save_cache
 from pdf_extract import extract_text_from_pdf
-from llm_clients import LLM_PROVIDER, PARAM_LABELS, analyze_with_llm
+from llm_clients import (
+    LLM_PROVIDER, PARAM_LABELS, analyze_with_llm,
+    load_known_cements, KNOWN_CEMENTS_FILE,
+)
 from layout import (
     app, long_callback_manager, _build_stepper,
     MAX_UPLOAD_SIZE_MB, TEMP_FOLDER,
@@ -854,6 +857,99 @@ def update_results(results):
         ], className="btn-row"),
     ]
     return card_content, {"display": "block"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CEMENT LEARNING (human-in-the-loop)
+# ─────────────────────────────────────────────────────────────────────────────
+def _collect_new_cements(results: list) -> list:
+    """Return unique new cement names in results not already in the known list."""
+    if not results:
+        return []
+    known = {c.lower() for c in load_known_cements()}
+    seen = set()
+    names = []
+    for r in results:
+        for raw in (r.get("new_cements") or []):
+            name = (raw or "").strip()
+            key = name.lower()
+            if name and key not in known and key not in seen:
+                seen.add(key)
+                names.append(name)
+    return names
+
+
+def _append_known_cement(name: str) -> None:
+    """Append a cement name to known_cements.txt if it is not already present."""
+    name = (name or "").strip()
+    if not name or name.lower() in {c.lower() for c in load_known_cements()}:
+        return
+    try:
+        with open(KNOWN_CEMENTS_FILE, "a", encoding="utf-8") as f:
+            f.write(name + "\n")
+    except OSError:
+        pass
+
+
+def _cement_row(name: str) -> html.Div:
+    """Build one confirmation row (message + Confirm + Dismiss) for a cement name."""
+    return html.Div(
+        [
+            html.Span(
+                ["New cement name found: ", html.Strong(f"'{name}'"),
+                 ". Add to the known list?"],
+                className="cement-msg",
+            ),
+            html.Div([
+                html.Button(
+                    "Confirm",
+                    id={"type": "cement-confirm", "index": name},
+                    className="btn-success", n_clicks=0,
+                ),
+                html.Button(
+                    "Dismiss",
+                    id={"type": "cement-dismiss", "index": name},
+                    className="btn-danger", n_clicks=0,
+                ),
+            ], className="btn-row"),
+        ],
+        id={"type": "cement-row", "index": name},
+        className="cement-row",
+    )
+
+
+@app.callback(
+    Output("cement-card",         "style"),
+    Output("cement-card-content", "children"),
+    Input("pipeline-results",     "data"),
+)
+def update_cement_card(results):
+    """Show the cement card with a row per newly discovered cement name."""
+    names = _collect_new_cements(results)
+    if not names:
+        return {"display": "none"}, ""
+    return {"display": "block"}, [_cement_row(n) for n in names]
+
+
+@app.callback(
+    Output({"type": "cement-row",     "index": MATCH}, "style"),
+    Input({"type": "cement-confirm",  "index": MATCH}, "n_clicks"),
+    Input({"type": "cement-dismiss",  "index": MATCH}, "n_clicks"),
+    State({"type": "cement-confirm",  "index": MATCH}, "id"),
+    prevent_initial_call=True,
+)
+def resolve_cement(confirm_clicks, dismiss_clicks, confirm_id):
+    """Confirm (append to file) or dismiss a single cement name, hiding its row."""
+    triggered = dash.ctx.triggered_id
+    if not triggered:
+        return dash.no_update
+    if triggered.get("type") == "cement-confirm":
+        if not confirm_clicks:
+            return dash.no_update
+        _append_known_cement(confirm_id["index"])
+    elif not dismiss_clicks:
+        return dash.no_update
+    return {"display": "none"}
 
 
 @app.callback(

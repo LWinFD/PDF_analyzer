@@ -10,7 +10,8 @@ Run with:
     pytest test_app.py -v
 
 With coverage:
-    pytest test_app.py -v --cov=app --cov=cache --cov=pdf_extract --cov=llm_clients --cov=layout --cov=callbacks --cov-report=term-missing
+    pytest test_app.py -v --cov=app --cov=cache --cov=pdf_extract \
+        --cov=llm_clients --cov=layout --cov=callbacks --cov-report=term-missing
 
 Install test deps:
     pip install pytest pytest-cov
@@ -33,7 +34,7 @@ os.environ.setdefault("OPENAI_API_KEY",    "test-placeholder-key")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-placeholder-key")
 os.environ.setdefault("GEMINI_API_KEY",    "test-placeholder-key")
 
-import app as A   # module under test
+import app as A   # module under test  # noqa: E402
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -132,7 +133,7 @@ class TestParamLabels(unittest.TestCase):
 class TestFormatTable(unittest.TestCase):
 
     def test_basic_two_column_table(self):
-        table  = [["Quarter", "Revenue"], ["Q1", "$1.2M"], ["Q2", "$1.5M"]]
+        table = [["Quarter", "Revenue"], ["Q1", "$1.2M"], ["Q2", "$1.5M"]]
         result = A._format_table(table)
         self.assertIn("Quarter | Revenue", result)
         self.assertIn("Q1 | $1.2M",        result)
@@ -165,17 +166,17 @@ class TestParseLlmJson(unittest.TestCase):
         self.assertEqual(result["wellbore_name"], "Well A-01")
 
     def test_json_fenced_with_backticks(self):
-        raw    = "```json\n" + json.dumps(_full_params()) + "\n```"
+        raw = "```json\n" + json.dumps(_full_params()) + "\n```"
         result = A._parse_llm_json(raw)
         self.assertEqual(result["pilot_hole_drilled"], "Yes")
 
     def test_plain_fences(self):
-        raw    = "```\n" + json.dumps(_full_params()) + "\n```"
+        raw = "```\n" + json.dumps(_full_params()) + "\n```"
         result = A._parse_llm_json(raw)
         self.assertIsInstance(result, dict)
 
     def test_whitespace_handled(self):
-        raw    = "   \n" + json.dumps(_full_params()) + "\n   "
+        raw = "   \n" + json.dumps(_full_params()) + "\n   "
         result = A._parse_llm_json(raw)
         self.assertIn("wellbore_name", result)
 
@@ -184,14 +185,51 @@ class TestParseLlmJson(unittest.TestCase):
             A._parse_llm_json("not json at all")
 
     def test_all_not_stated(self):
-        data   = {k: "Not stated" for k in A.PARAM_LABELS.keys()}
+        data = {k: "Not stated" for k in A.PARAM_LABELS.keys()}
         result = A._parse_llm_json(json.dumps(data))
-        self.assertTrue(all(v == "Not stated" for v in result.values()))
+        self.assertTrue(all(result[k] == "Not stated" for k in A.PARAM_LABELS.keys()))
 
     def test_wellbore_name_parsed_correctly(self):
-        data   = _full_params(wellbore="15/9-F-11 T2")
+        data = _full_params(wellbore="15/9-F-11 T2")
         result = A._parse_llm_json(json.dumps(data))
         self.assertEqual(result["wellbore_name"], "15/9-F-11 T2")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 3b. load_known_cements() and new_cements parsing
+# ══════════════════════════════════════════════════════════════════════════════
+class TestKnownCements(unittest.TestCase):
+
+    def test_load_returns_names_ignoring_comments_and_blanks(self):
+        content = "# header\n\nClass G\nNorcem G\n   \n# note\nTuned Light XL\n"
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(content)
+            tmp_path = f.name
+        try:
+            with patch("llm_clients.KNOWN_CEMENTS_FILE", tmp_path):
+                names = A.load_known_cements()
+            self.assertEqual(names, ["Class G", "Norcem G", "Tuned Light XL"])
+        finally:
+            os.remove(tmp_path)
+
+    def test_load_missing_file_returns_empty_list(self):
+        missing = os.path.join(tempfile.gettempdir(), "no_such_cements_98765.txt")
+        if os.path.exists(missing):
+            os.remove(missing)
+        with patch("llm_clients.KNOWN_CEMENTS_FILE", missing):
+            self.assertEqual(A.load_known_cements(), [])
+
+    def test_parse_extracts_new_cements_when_present(self):
+        data = _full_params()
+        data["new_cements"] = ["Special Blend X", "FoamCem 9"]
+        result = A._parse_llm_json(json.dumps(data))
+        self.assertEqual(result["new_cements"], ["Special Blend X", "FoamCem 9"])
+
+    def test_parse_new_cements_empty_when_absent(self):
+        result = A._parse_llm_json(json.dumps(_full_params()))
+        self.assertEqual(result["new_cements"], [])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -217,7 +255,7 @@ class TestResultsToCsv(unittest.TestCase):
 
     def test_multiple_pdfs_produce_multiple_rows(self):
         results = [_sample_result(f"report_{i}.pdf", f"Well-{i}") for i in range(3)]
-        lines   = A.results_to_csv(results).splitlines()
+        lines = A.results_to_csv(results).splitlines()
         self.assertEqual(len(lines), 4)   # header + 3 data rows
 
     def test_wellbore_name_appears_in_data_rows(self):
@@ -266,7 +304,7 @@ class TestMetadataToCsv(unittest.TestCase):
 
     def test_multiple_results_produce_multiple_rows(self):
         results = [_sample_result(f"r{i}.pdf") for i in range(4)]
-        lines   = A.metadata_to_csv(results).splitlines()
+        lines = A.metadata_to_csv(results).splitlines()
         self.assertEqual(len(lines), 5)   # header + 4 rows
 
     def test_timing_values_appear_in_row(self):
@@ -425,13 +463,13 @@ class TestBuildResultsTable(unittest.TestCase):
         self.assertIn("Source File", str(A.build_results_table([_sample_result()])))
 
     def test_multiple_rows_rendered(self):
-        results  = [_sample_result(f"report_{i}.pdf") for i in range(1, 4)]
+        results = [_sample_result(f"report_{i}.pdf") for i in range(1, 4)]
         rendered = str(A.build_results_table(results))
         for i in range(1, 4):
             self.assertIn(f"report_{i}.pdf", rendered)
 
     def test_wellbore_names_appear_in_rows(self):
-        results  = [_sample_result("r1.pdf", "Well-A"), _sample_result("r2.pdf", "Well-B")]
+        results = [_sample_result("r1.pdf", "Well-A"), _sample_result("r2.pdf", "Well-B")]
         rendered = str(A.build_results_table(results))
         self.assertIn("Well-A", rendered)
         self.assertIn("Well-B", rendered)
@@ -452,13 +490,13 @@ class TestBuildTotalsBar(unittest.TestCase):
         self.assertIsInstance(A.build_totals_bar([_sample_result()]), html.Div)
 
     def test_pdf_count_shown(self):
-        results  = [_sample_result(f"r{i}.pdf") for i in range(3)]
+        results = [_sample_result(f"r{i}.pdf") for i in range(3)]
         rendered = str(A.build_totals_bar(results))
         self.assertIn("3", rendered)
 
     def test_input_tokens_summed_across_results(self):
         """Two results each with 5 000 input tokens → total must be 10 000."""
-        results  = [_sample_result("a.pdf"), _sample_result("b.pdf")]
+        results = [_sample_result("a.pdf"), _sample_result("b.pdf")]
         rendered = str(A.build_totals_bar(results))
         self.assertIn("10,000", rendered)
 
@@ -564,15 +602,15 @@ class TestExtractTextFromPdf(unittest.TestCase):
 
     def _mock_page(self, text="", tables=None):
         page = MagicMock()
-        page.extract_text.return_value   = text
+        page.extract_text.return_value = text
         page.extract_tables.return_value = tables or []
         return page
 
     @patch("pdfplumber.open")
     def test_digital_text_extracted(self, mock_open):
-        page_text        = "A" * 50
-        mock_pdf         = MagicMock()
-        mock_pdf.pages   = [self._mock_page(text=page_text)]
+        page_text = "A" * 50
+        mock_pdf = MagicMock()
+        mock_pdf.pages = [self._mock_page(text=page_text)]
         mock_open.return_value.__enter__.return_value = mock_pdf
         result, _ = A.extract_text_from_pdf("fake.pdf")
         self.assertIn("A" * 50, result)
@@ -580,9 +618,9 @@ class TestExtractTextFromPdf(unittest.TestCase):
 
     @patch("pdfplumber.open")
     def test_table_content_included(self, mock_open):
-        table            = [["Col1", "Col2"], ["Val1", "Val2"]]
-        mock_pdf         = MagicMock()
-        mock_pdf.pages   = [self._mock_page(text="B" * 50, tables=[table])]
+        table = [["Col1", "Col2"], ["Val1", "Val2"]]
+        mock_pdf = MagicMock()
+        mock_pdf.pages = [self._mock_page(text="B" * 50, tables=[table])]
         mock_open.return_value.__enter__.return_value = mock_pdf
         result, _ = A.extract_text_from_pdf("fake.pdf")
         self.assertIn("Col1 | Col2", result)
@@ -590,8 +628,8 @@ class TestExtractTextFromPdf(unittest.TestCase):
 
     @patch("pdfplumber.open")
     def test_short_text_triggers_ocr_path(self, mock_open):
-        mock_pdf         = MagicMock()
-        mock_pdf.pages   = [self._mock_page(text="tiny")]
+        mock_pdf = MagicMock()
+        mock_pdf.pages = [self._mock_page(text="tiny")]
         mock_open.return_value.__enter__.return_value = mock_pdf
         with patch.dict(sys.modules, {"pdf2image": None, "pytesseract": None}):
             result, _ = A.extract_text_from_pdf("fake.pdf")
@@ -599,8 +637,8 @@ class TestExtractTextFromPdf(unittest.TestCase):
 
     @patch("pdfplumber.open")
     def test_multi_page_all_headers_present(self, mock_open):
-        mock_pdf         = MagicMock()
-        mock_pdf.pages   = [self._mock_page(text="X" * 50) for _ in range(3)]
+        mock_pdf = MagicMock()
+        mock_pdf.pages = [self._mock_page(text="X" * 50) for _ in range(3)]
         mock_open.return_value.__enter__.return_value = mock_pdf
         result, _ = A.extract_text_from_pdf("fake.pdf")
         for i in range(1, 4):
@@ -609,10 +647,10 @@ class TestExtractTextFromPdf(unittest.TestCase):
     @patch("pdfplumber.open")
     def test_text_extraction_error_caught(self, mock_open):
         page = MagicMock()
-        page.extract_text.side_effect    = ["A" * 50, RuntimeError("corrupt")]
+        page.extract_text.side_effect = ["A" * 50, RuntimeError("corrupt")]
         page.extract_tables.return_value = []
-        mock_pdf         = MagicMock()
-        mock_pdf.pages   = [page]
+        mock_pdf = MagicMock()
+        mock_pdf.pages = [page]
         mock_open.return_value.__enter__.return_value = mock_pdf
         result, _ = A.extract_text_from_pdf("fake.pdf")
         self.assertIn("TEXT ERROR", result)
@@ -620,8 +658,8 @@ class TestExtractTextFromPdf(unittest.TestCase):
     @patch("pdfplumber.open")
     def test_extract_meta_populated_after_call(self, mock_open):
         """extract_text_from_pdf must return (text, meta) with page_count and ocr_used."""
-        mock_pdf         = MagicMock()
-        mock_pdf.pages   = [self._mock_page(text="Z" * 50) for _ in range(5)]
+        mock_pdf = MagicMock()
+        mock_pdf.pages = [self._mock_page(text="Z" * 50) for _ in range(5)]
         mock_open.return_value.__enter__.return_value = mock_pdf
         _, meta = A.extract_text_from_pdf("fake.pdf")
         self.assertEqual(meta["page_count"], 5)
@@ -649,7 +687,7 @@ class TestAnalyzeWithLlm(unittest.TestCase):
         )
         mock_cls.return_value = mock_client
         result, _ = A.analyze_with_llm("drilling text")
-        self.assertEqual(set(result.keys()), self.ALL_KEYS)
+        self.assertTrue(self.ALL_KEYS.issubset(result.keys()))
 
     @patch("llm_clients.LLM_PROVIDER", "openai")
     @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"})
@@ -668,11 +706,11 @@ class TestAnalyzeWithLlm(unittest.TestCase):
     @patch("openai.OpenAI")
     def test_openai_populates_llm_call_meta(self, mock_cls):
         """Token counts and model name must be returned in the second tuple element."""
-        mock_resp                          = MagicMock()
+        mock_resp = MagicMock()
         mock_resp.choices[0].message.content = self._mock_json()
-        mock_resp.usage.prompt_tokens      = 1234
-        mock_resp.usage.completion_tokens  = 56
-        mock_resp.model                    = "gpt-4o-mini"
+        mock_resp.usage.prompt_tokens = 1234
+        mock_resp.usage.completion_tokens = 56
+        mock_resp.model = "gpt-4o-mini"
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_resp
         mock_cls.return_value = mock_client
@@ -697,7 +735,7 @@ class TestAnalyzeWithLlm(unittest.TestCase):
         mock_client.messages.create.return_value.content[0].text = self._mock_json()
         mock_cls.return_value = mock_client
         result, _ = A.analyze_with_llm("text")
-        self.assertEqual(set(result.keys()), self.ALL_KEYS)
+        self.assertTrue(self.ALL_KEYS.issubset(result.keys()))
 
     @patch("llm_clients.LLM_PROVIDER", "anthropic")
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": ""})
@@ -715,7 +753,7 @@ class TestAnalyzeWithLlm(unittest.TestCase):
         mock_model.generate_content.return_value.text = self._mock_json()
         mock_model_cls.return_value = mock_model
         result, _ = A.analyze_with_llm("text")
-        self.assertEqual(set(result.keys()), self.ALL_KEYS)
+        self.assertTrue(self.ALL_KEYS.issubset(result.keys()))
 
     @patch("llm_clients.LLM_PROVIDER", "gemini")
     @patch.dict(os.environ, {"GEMINI_API_KEY": ""})
@@ -742,7 +780,7 @@ class TestAnalyzeWithLlm(unittest.TestCase):
         )
         mock_cls.return_value = mock_client
         result, _ = A.analyze_with_llm("text", provider="openai")
-        self.assertEqual(set(result.keys()), self.ALL_KEYS)
+        self.assertTrue(self.ALL_KEYS.issubset(result.keys()))
 
     # ── Markdown fence stripping ──────────────────────────────────────────────
     @patch("llm_clients.LLM_PROVIDER", "openai")
@@ -754,7 +792,7 @@ class TestAnalyzeWithLlm(unittest.TestCase):
         mock_client.chat.completions.create.return_value.choices[0].message.content = fenced
         mock_cls.return_value = mock_client
         result, _ = A.analyze_with_llm("text")
-        self.assertEqual(set(result.keys()), self.ALL_KEYS)
+        self.assertTrue(self.ALL_KEYS.issubset(result.keys()))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -771,7 +809,7 @@ class TestProcessSinglePdf(unittest.TestCase):
         self.assertIn("not a PDF", err)
 
     def test_oversized_file_returns_error(self):
-        big        = b"X" * (A.MAX_UPLOAD_SIZE_MB * 1024 * 1024 + 1)
+        big = b"X" * (A.MAX_UPLOAD_SIZE_MB * 1024 * 1024 + 1)
         result, err = A.process_single_pdf(self._make_contents(big), "big.pdf")
         self.assertIsNone(result)
         self.assertIn("MB", err)
@@ -782,7 +820,10 @@ class TestProcessSinglePdf(unittest.TestCase):
     @patch("callbacks.analyze_with_llm")
     def test_happy_path_returns_all_15_param_keys(self, mock_llm, mock_extract, _mock_load, _mock_save):
         mock_extract.return_value = ("Drilling report text " * 10, {"page_count": 1, "ocr_used": False})
-        mock_llm.return_value     = (_full_params("15/9-F-11 T2"), {"input_tokens": 0, "output_tokens": 0, "model_name": ""})
+        mock_llm.return_value = (
+            _full_params("15/9-F-11 T2"),
+            {"input_tokens": 0, "output_tokens": 0, "model_name": ""},
+        )
         result, err = A.process_single_pdf(self._make_contents(), "well.pdf")
         self.assertEqual(err, "")
         param_keys = set(result.keys()) - {"_source_file", "_meta"}
@@ -794,8 +835,11 @@ class TestProcessSinglePdf(unittest.TestCase):
     @patch("callbacks.analyze_with_llm")
     def test_happy_path_includes_wellbore_name(self, mock_llm, mock_extract, _mock_load, _mock_save):
         mock_extract.return_value = ("Drilling report text " * 10, {"page_count": 1, "ocr_used": False})
-        mock_llm.return_value     = (_full_params("15/9-F-11 T2"), {"input_tokens": 0, "output_tokens": 0, "model_name": ""})
-        result, _  = A.process_single_pdf(self._make_contents(), "well.pdf")
+        mock_llm.return_value = (
+            _full_params("15/9-F-11 T2"),
+            {"input_tokens": 0, "output_tokens": 0, "model_name": ""},
+        )
+        result, _ = A.process_single_pdf(self._make_contents(), "well.pdf")
         self.assertEqual(result["wellbore_name"], "15/9-F-11 T2")
         self.assertEqual(result["_source_file"],  "well.pdf")
 
@@ -806,7 +850,7 @@ class TestProcessSinglePdf(unittest.TestCase):
     def test_result_contains_meta_dict_with_required_fields(self, mock_llm, mock_extract, _mock_load, _mock_save):
         """Every successful result must have a _meta dict with all provenance fields."""
         mock_extract.return_value = ("text " * 20, {"page_count": 1, "ocr_used": False})
-        mock_llm.return_value     = (_full_params(), {"input_tokens": 0, "output_tokens": 0, "model_name": ""})
+        mock_llm.return_value = (_full_params(), {"input_tokens": 0, "output_tokens": 0, "model_name": ""})
         result, _ = A.process_single_pdf(self._make_contents(), "well.pdf")
         self.assertIn("_meta", result)
         for field in [
@@ -838,7 +882,7 @@ class TestProcessSinglePdf(unittest.TestCase):
     @patch("callbacks._load_cache", return_value={})
     def test_llm_exception_returns_error(self, _mock_cache, mock_llm, mock_extract):
         mock_extract.return_value = ("valid text " * 20, {"page_count": 1, "ocr_used": False})
-        mock_llm.side_effect      = RuntimeError("API quota exceeded")
+        mock_llm.side_effect = RuntimeError("API quota exceeded")
         result, err = A.process_single_pdf(self._make_contents(), "report.pdf")
         self.assertIsNone(result)
         self.assertIn("LLM analysis failed", err)
@@ -849,11 +893,11 @@ class TestProcessSinglePdf(unittest.TestCase):
     @patch("callbacks._save_cache")
     def test_cache_hit_skips_extraction_and_llm(self, mock_save, mock_load, mock_llm, mock_extract):
         """When a cache entry matches the file hash, extraction and LLM must not run."""
-        raw_bytes  = b"%PDF-1.4 fake"
-        cache_key  = "gemini:" + hashlib.sha256(raw_bytes).hexdigest()
-        cached     = _full_params("CachedWell")
+        raw_bytes = b"%PDF-1.4 fake"
+        cache_key = "gemini:" + hashlib.sha256(raw_bytes).hexdigest()
+        cached = _full_params("CachedWell")
         cached["_source_file"] = "old_name.pdf"
-        cached["_meta"]        = {}
+        cached["_meta"] = {}
         mock_load.return_value = {cache_key: cached}
 
         result, err = A.process_single_pdf(self._make_contents(raw_bytes), "new_name.pdf")
@@ -1002,7 +1046,7 @@ class TestLoadFromCache(unittest.TestCase):
     def test_valid_entries_merged_with_existing(self, mock_load):
         valid = _full_params("CachedWell")
         valid["_source_file"] = "cached.pdf"
-        valid["_meta"]        = {}
+        valid["_meta"] = {}
         mock_load.return_value = {"some_hash": valid}
         existing = [_sample_result("existing.pdf")]
         result, msg, cls, *_ = A.load_from_cache(1, existing)
@@ -1024,7 +1068,7 @@ class TestLoadFromCache(unittest.TestCase):
         """When entries are skipped, the count must appear in the message string."""
         valid = _full_params()
         valid["_source_file"] = "v.pdf"
-        valid["_meta"]        = {}
+        valid["_meta"] = {}
         mock_load.return_value = {
             "valid":   valid,
             "invalid": {"only": "one key"},
@@ -1041,7 +1085,7 @@ class TestLoadFromCache(unittest.TestCase):
         """Re-clicking Load from Cache must not add rows already in the results."""
         valid = _full_params("CachedWell")
         valid["_source_file"] = "cached.pdf"
-        valid["_meta"]        = {}
+        valid["_meta"] = {}
         mock_load.return_value = {"some_hash": valid}
         existing = [valid.copy()]
         result, msg, cls, *_ = A.load_from_cache(1, existing)

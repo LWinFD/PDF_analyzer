@@ -54,6 +54,7 @@ from cache import CACHE_FILE, VALIDATION_FILE, _load_cache, _save_cache    # noq
 from pdf_extract import OCR_THRESHOLD, _format_table, extract_text_from_pdf  # noqa: E402
 from llm_clients import (                                                  # noqa: E402
     LLM_PROVIDER, PARAM_LABELS, ANALYSIS_PROMPT, _parse_llm_json, analyze_with_llm,
+    load_known_cements, KNOWN_CEMENTS_FILE,
 )
 from layout import (                                                       # noqa: E402
     app, server, STYLES, MAX_UPLOAD_SIZE_MB, TEMP_FOLDER, long_callback_manager,
@@ -78,6 +79,7 @@ __all__ = [
     "CACHE_FILE", "VALIDATION_FILE", "_load_cache", "_save_cache",
     "OCR_THRESHOLD", "_format_table", "extract_text_from_pdf",
     "LLM_PROVIDER", "PARAM_LABELS", "ANALYSIS_PROMPT", "_parse_llm_json", "analyze_with_llm",
+    "load_known_cements", "KNOWN_CEMENTS_FILE",
     "app", "server", "STYLES", "MAX_UPLOAD_SIZE_MB", "TEMP_FOLDER", "long_callback_manager",
     "_build_stepper", "_value_td", "build_results_table", "build_metadata_table", "build_totals_bar",
     "results_to_csv", "metadata_to_csv", "_cleanup", "process_single_pdf", "_QUEUED_BADGE_STYLE",

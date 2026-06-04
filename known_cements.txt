@@ -1,0 +1,16 @@
+# known_cements.txt — recognised cement type names for the Well Report Analyzer.
+#
+# This file is auto-extended: when the app discovers a cement name the LLM did
+# not recognise and you click "Confirm" on the confirmation card, the new name
+# is appended here (one per line) so future runs treat it as known.
+#
+# Lines starting with "#" and blank lines are ignored.
+# One cement name per line.
+Class G
+Norcem G
+Dyckerhoff G
+Tuned Light XL
+Tuned Light XLE
+X-lite
+DWFS
+Class C

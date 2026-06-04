@@ -42,4 +42,5 @@ Thumbs.db
 *.csv
 *.txt
 !requirements.txt
+!known_cements.txt
 !Validation.csv

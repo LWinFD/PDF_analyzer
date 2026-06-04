@@ -260,6 +260,19 @@ body {
 }
 .btn-success:hover { opacity: 0.85; }
 
+.cement-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+}
+.cement-row:last-child { border-bottom: none; }
+.cement-msg {
+    font-family: var(--mono); font-size: 12px; color: var(--text-muted);
+    letter-spacing: 0.5px;
+}
+.cement-msg strong { color: var(--amber); }
+.cement-row .btn-row { margin-top: 0; }
+
 .totals-bar  { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
 .totals-chip {
     background: var(--bg-primary); border: 1px solid var(--border);
@@ -807,6 +820,17 @@ app.layout = html.Div([
             color="#e6a817",
             children=html.Div(id="results-card", style={"display": "none"}),
         ),
+
+        # ── Cement learning card (shown only when new cement names are found) ─
+        html.Div([
+            html.Div("New Cement Names Discovered", className="section-label"),
+            html.Div(
+                "These cement names were not in the known list. Confirm to teach "
+                "the analyzer, or dismiss to ignore.",
+                className="results-summary",
+            ),
+            html.Div(id="cement-card-content"),
+        ], id="cement-card", style={"display": "none"}, className="section-card"),
 
         # ── Validate button row (shown only when sample wells are present) ──
         html.Div([

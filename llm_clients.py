@@ -10,6 +10,25 @@ import json
 
 LLM_PROVIDER = "gemini"   # options: "openai", "anthropic", "gemini"
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+KNOWN_CEMENTS_FILE = os.path.join(_HERE, "known_cements.txt")
+
+
+def load_known_cements() -> list:
+    """Return cement names from known_cements.txt, ignoring blank and # lines."""
+    try:
+        with open(KNOWN_CEMENTS_FILE, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        return []
+    names = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            names.append(stripped)
+    return names
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PARAMETER DEFINITIONS
 # Keys must match the JSON keys the LLM prompt instructs the model to return.
@@ -88,8 +107,10 @@ PARAMETERS TO EXTRACT:
    - If not found, return: "Not stated"
 
 6. Conductor Cement Type
-   - Return one or more of: Class G, Norcem G, Dyckerhoff G, Tuned Light XL, Tuned Light XLE, X-lite, DWFS, Class C
-     (comma-separated if multiple).
+   - Return one or more of the known cement type names listed in the
+     KNOWN CEMENT TYPES section below (comma-separated if multiple).
+     If the document uses a cement name not in that list, return it
+     exactly as written.
    - Match case-insensitively and normalize synonyms:
        "API Class G", "API CLASS G", "Class G cement"  ->  Class G
        "Norcem Class G"                                 ->  Norcem G
@@ -147,8 +168,10 @@ PARAMETERS TO EXTRACT:
       return: "Not stated"
 
 11. Surface Casing Cement Type
-    - Return one or more of: Class G, Norcem G, Dyckerhoff G, Tuned Light XL, Tuned Light XLE, X-lite, DWFS, Class C
-      (comma-separated if multiple).
+    - Return one or more of the known cement type names listed in the
+      KNOWN CEMENT TYPES section below (comma-separated if multiple).
+      If the document uses a cement name not in that list, return it
+      exactly as written.
     - Match case-insensitively and normalize synonyms exactly as for the conductor (item 6).
     - The surface casing is typically the 20" or 13 3/8" casing string. In older reports
       it may be identified only by diameter rather than by the label "surface casing".
@@ -188,6 +211,9 @@ PARAMETERS TO EXTRACT:
       " mRKB" (e.g. "1350 mRKB").
     - If the shoe depth itself cannot be located at all, return: "Not stated"
 
+KNOWN CEMENT TYPES:
+{known_cements_guidance}
+
 INSTRUCTIONS:
 - Do NOT guess or fabricate values. Only extract what is explicitly stated, clearly implied,
   or inferable from the explicit mappings above.
@@ -225,12 +251,16 @@ RAW EXTRACTED TEXT:
 
 
 def _parse_llm_json(response_text: str) -> dict:
-    """Strip markdown fences if present, then parse the JSON."""
+    """Strip markdown fences if present, parse the JSON, normalise new_cements."""
     text = response_text.strip()
     if text.startswith("```"):
         lines = text.splitlines()
         text = "\n".join(ln for ln in lines if not ln.strip().startswith("```"))
-    return json.loads(text.strip())
+    result = json.loads(text.strip())
+    if isinstance(result, dict):
+        new_cements = result.get("new_cements")
+        result["new_cements"] = new_cements if isinstance(new_cements, list) else []
+    return result
 
 
 def analyze_with_llm(raw_text: str, provider: str = None) -> tuple:
@@ -244,7 +274,20 @@ def analyze_with_llm(raw_text: str, provider: str = None) -> tuple:
     """
     if provider is None:
         provider = LLM_PROVIDER
-    prompt = ANALYSIS_PROMPT.format(raw_extracted_text=raw_text)
+
+    known = load_known_cements()
+    known_list = ", ".join(known) if known else "(none recorded yet)"
+    known_cements_guidance = (
+        "The currently known cement type names are: " + known_list + ".\n"
+        "If you encounter a cement type name that is not in the known types list "
+        "above, extract it exactly as written and add a 'new_cements' key to your "
+        "JSON response: a list of the unrecognised cement name strings. If there "
+        "are none, omit the key."
+    )
+    prompt = ANALYSIS_PROMPT.format(
+        raw_extracted_text=raw_text,
+        known_cements_guidance=known_cements_guidance,
+    )
 
     if provider == "openai":
         try:
